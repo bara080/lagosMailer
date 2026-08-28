@@ -62,6 +62,16 @@ button { font: inherit; cursor: pointer; }
 .nav a.active svg { color: var(--accent); }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
 
+.collapse-btn { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); font-weight: 500; }
+.collapse-btn:hover { color: var(--text); border-color: var(--border-2); }
+
+/* Collapsed rail: icon-only, narrow. Transitions the width for a smooth toggle. */
+.sidebar { transition: width .16s ease; }
+.sidebar.collapsed { width: 68px; padding-left: 10px; padding-right: 10px; }
+.sidebar.collapsed .brand { justify-content: center; padding: 6px 0 18px; }
+.sidebar.collapsed .nav a { justify-content: center; gap: 0; padding: 10px 0; }
+.sidebar.collapsed .collapse-btn { justify-content: center; gap: 0; padding: 10px 0; }
+
 /* SMTP status card */
 .smtp-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface-2); }
 .smtp-card .row { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }

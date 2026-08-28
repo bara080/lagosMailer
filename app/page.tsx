@@ -3,13 +3,18 @@ import {
   Users, UserPlus, Mail, Send, Eye, Reply, MessageSquare, Trophy, AlertTriangle, Ban, Activity,
 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
-import { MetricCard, MetricCardSkeleton, Skeleton, StatusBadge, EmptyState } from '@/components/ui';
+import { MetricCard, Skeleton, StatusBadge, EmptyState } from '@/components/ui';
 import { Donut, LineChart } from '@/components/charts';
 import { useStats } from '@/lib/hooks';
 
 const STAGE_COLORS: Record<string, string> = {
   new: '#4f8cff', contacted: '#f0a637', replied: '#a974ff', qualified: '#29c273', won: '#e7b64b',
 };
+
+// Metric value: the number, or a skeleton while stats load (keeps the icon visible).
+function mv(n?: number) {
+  return typeof n === 'number' ? n.toLocaleString() : <Skeleton w={60} h={22} />;
+}
 
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -28,28 +33,20 @@ export default function OverviewPage() {
       <Topbar title="Dashboard" subtitle="Overview of your email outreach performance"
         actions={<select className="input" style={{ width: 150 }}><option>Last 7 days</option><option>Last 30 days</option></select>} />
       <div className="page">
-        {/* Metric cards */}
+        {/* Metric cards — icons + labels always render; only the value skeletons while loading */}
         <div className="metrics">
-          {isLoading || !m ? Array.from({ length: 5 }).map((_, i) => <MetricCardSkeleton key={i} />) : (
-            <>
-              <MetricCard icon={<Users size={18} />} tone="purple" label="Total Leads" value={m.totalLeads.toLocaleString()} delta={null} />
-              <MetricCard icon={<UserPlus size={18} />} tone="green" label="New Leads" value={m.newLeads.toLocaleString()} delta={{ dir: 'up', text: `${m.newThisWeek} this week` }} />
-              <MetricCard icon={<Mail size={18} />} tone="blue" label="Emails Sent" value={m.emailsSent.toLocaleString()} delta={{ dir: 'up', text: `${m.sentThisWeek} this week` }} />
-              <MetricCard icon={<Send size={18} />} tone="cyan" label="Delivered" value={m.delivered.toLocaleString()} delta={null} />
-              <MetricCard icon={<Eye size={18} />} tone="amber" label="Opens" value={m.opens.toLocaleString()} delta={{ dir: 'flat', text: 'tracking soon' }} />
-            </>
-          )}
+          <MetricCard icon={<Users size={18} />} tone="purple" label="Total Leads" value={mv(m?.totalLeads)} delta={null} />
+          <MetricCard icon={<UserPlus size={18} />} tone="green" label="New Leads" value={mv(m?.newLeads)} delta={m ? { dir: 'up', text: `${m.newThisWeek} this week` } : null} />
+          <MetricCard icon={<Mail size={18} />} tone="blue" label="Emails Sent" value={mv(m?.emailsSent)} delta={m ? { dir: 'up', text: `${m.sentThisWeek} this week` } : null} />
+          <MetricCard icon={<Send size={18} />} tone="cyan" label="Delivered" value={mv(m?.delivered)} delta={null} />
+          <MetricCard icon={<Eye size={18} />} tone="amber" label="Opens" value={mv(m?.opens)} delta={m ? { dir: 'flat', text: 'tracking soon' } : null} />
         </div>
         <div className="metrics mt16">
-          {isLoading || !m ? Array.from({ length: 5 }).map((_, i) => <MetricCardSkeleton key={i} />) : (
-            <>
-              <MetricCard icon={<Reply size={18} />} tone="purple" label="Replies" value={m.replies.toLocaleString()} delta={null} />
-              <MetricCard icon={<MessageSquare size={18} />} tone="green" label="Qualified" value={m.qualified.toLocaleString()} delta={null} />
-              <MetricCard icon={<Trophy size={18} />} tone="amber" label="Won" value={m.won.toLocaleString()} delta={null} />
-              <MetricCard icon={<AlertTriangle size={18} />} tone="red" label="Bounces / Failed" value={m.bounces.toLocaleString()} delta={null} />
-              <MetricCard icon={<Ban size={18} />} tone="red" label="Unsubscribes" value={m.unsubscribes.toLocaleString()} delta={null} />
-            </>
-          )}
+          <MetricCard icon={<Reply size={18} />} tone="purple" label="Replies" value={mv(m?.replies)} delta={null} />
+          <MetricCard icon={<MessageSquare size={18} />} tone="green" label="Qualified" value={mv(m?.qualified)} delta={null} />
+          <MetricCard icon={<Trophy size={18} />} tone="amber" label="Won" value={mv(m?.won)} delta={null} />
+          <MetricCard icon={<AlertTriangle size={18} />} tone="red" label="Bounces / Failed" value={mv(m?.bounces)} delta={null} />
+          <MetricCard icon={<Ban size={18} />} tone="red" label="Unsubscribes" value={mv(m?.unsubscribes)} delta={null} />
         </div>
 
         {/* Middle: performance + right rail */}

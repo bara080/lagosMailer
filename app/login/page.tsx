@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Eye, EyeOff } from 'lucide-react';
 import './login.css';
 
 // Login page. Ports zinga-os's (auth)/login/page.tsx behaviour (email +
@@ -12,6 +13,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -76,16 +78,27 @@ export default function LoginPage() {
             <label className="lm-login__label" htmlFor="password">
               Password
             </label>
-            <input
-              id="password"
-              className="lm-login__input"
-              type="password"
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="lm-login__inputwrap">
+              <input
+                id="password"
+                className="lm-login__input"
+                type={showPw ? 'text' : 'password'}
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="lm-login__eye"
+                onClick={() => setShowPw((s) => !s)}
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+                title={showPw ? 'Hide password' : 'Show password'}
+              >
+                {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           <button className="lm-login__button" type="submit" disabled={loading}>

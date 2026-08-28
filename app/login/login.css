@@ -69,6 +69,33 @@
   border-color: var(--accent, #4f8cff);
 }
 
+.lm-login__inputwrap {
+  position: relative;
+}
+
+.lm-login__inputwrap .lm-login__input {
+  padding-right: 44px;
+}
+
+.lm-login__eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  background: none;
+  border: none;
+  color: var(--text-dim, #8b93a1);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.lm-login__eye:hover {
+  color: var(--text, #e6e8eb);
+}
+
 .lm-login__input::placeholder {
   color: var(--text-dim, #8b93a1);
   opacity: 0.7;
