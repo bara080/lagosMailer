@@ -169,28 +169,39 @@ export async function markContacted(company, id, subject) {
   await writeAll(company, leads);
 }
 
-// Import a CSV (columns: email/to_email, business/name, category, instagram, …).
+// Pick the first non-empty value among a set of header aliases (case-insensitive;
+// keys are already lowercased by the CSV parser / sheet reader).
+function pick(r, ...aliases) {
+  for (const a of aliases) {
+    const v = r[a];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return '';
+}
+
+// Import rows (from CSV or Google Sheets). Tolerant of common header names, e.g.
+// "Email Address", "Full Name", "Company", "Phone Number".
 export async function importCsv(company, rows) {
   const leads = await readAll(company);
   let added = 0;
   for (const r of rows) {
-    const email = (r.email || r.to_email || '').trim();
-    const instagram = (r.instagram || '').trim();
+    const email = pick(r, 'email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail');
+    const instagram = pick(r, 'instagram', 'ig', 'handle', 'instagram handle');
     if (!email && !instagram) continue;
     if (email && leads.some((l) => l.email.toLowerCase() === email.toLowerCase())) continue; // dedup
     leads.push(
       normalize({
         id: nextId(leads),
-        business: r.business || r.business_name || '',
-        name: r.name || r.owner || '',
+        business: pick(r, 'business', 'business_name', 'business name', 'company', 'company name', 'organization'),
+        name: pick(r, 'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name'),
         email,
         instagram,
-        phone: r.phone || '',
-        website: r.website || '',
-        category: r.category || '',
-        borough: r.borough || '',
-        source: r.source || 'import',
-        subject: r.subject || '',
+        phone: pick(r, 'phone', 'phone number', 'mobile', 'tel', 'telephone'),
+        website: pick(r, 'website', 'url', 'site', 'web'),
+        category: pick(r, 'category', 'type', 'vertical'),
+        borough: pick(r, 'borough', 'city', 'area', 'location'),
+        source: pick(r, 'source') || 'import',
+        subject: pick(r, 'subject'),
         created_at: new Date().toISOString(),
       }),
     );
