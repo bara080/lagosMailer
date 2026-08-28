@@ -7,3 +7,7 @@ sent-log.csv
 recipients.csv
 data/
 .DS_Store
+
+# Test/browser artifacts
+.playwright-mcp/
+*.png
