@@ -36,10 +36,10 @@ function base64url(bytes: Uint8Array): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function fromBase64url(str: string): Uint8Array {
+function fromBase64url(str: string): Uint8Array<ArrayBuffer> {
   const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
   const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
+  const bytes = new Uint8Array(new ArrayBuffer(bin.length));
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }

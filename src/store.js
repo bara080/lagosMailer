@@ -1,12 +1,16 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { getSupabase } from '../lib/supabase.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Local lead store — the CRM data layer.
+// Lead store — the CRM data layer.
 //
-// Ported from zinga-os `ops.leads` (Supabase Postgres) but backed by a local
-// JSON file so it runs on localhost with zero external services. Same record
-// shape and same stage lifecycle; the storage engine is the only thing swapped.
+// Ported from zinga-os `ops.leads` (Supabase Postgres). Originally backed by a
+// local JSON file for zero-dependency localhost dev; now backed by Supabase
+// (Postgres) so it runs on Vercel's read-only filesystem. Same record shape and
+// same stage lifecycle; the storage engine is the only thing swapped.
+//
+// Each whole-document collection (`leads`, `campaigns`, `sends`, `activity`,
+// `last-blast`) maps to ONE row in the `crm_store` KV table: key text primary
+// key, value jsonb.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Stage lifecycle (copied from zinga-os, trimmed to the load-bearing stages).
@@ -22,19 +26,26 @@ export const STAGE_TABS = [
   { key: 'won', label: 'Won', match: (l) => l.stage === 'won' },
 ];
 
-const DATA_DIR = () => path.join(process.cwd(), 'data');
-const FILE = () => path.join(DATA_DIR(), 'leads.json');
-const SENDS = () => path.join(DATA_DIR(), 'sends.json');
-const ACTIVITY = () => path.join(DATA_DIR(), 'activity.json');
-const CAMP = () => path.join(DATA_DIR(), 'campaigns.json');
+// ── KV primitives (crm_store) ────────────────────────────────────────────────
+const TABLE = 'crm_store';
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR())) fs.mkdirSync(DATA_DIR(), { recursive: true });
+// Read a KV row's `value`, or `fallback` when the key does not exist yet.
+async function kvGet(key, fallback) {
+  const sb = getSupabase();
+  const { data, error } = await sb.from(TABLE).select('value').eq('key', key).maybeSingle();
+  if (error) throw new Error(`crm_store read failed (${key}): ${error.message}`);
+  if (!data) return fallback;
+  return data.value;
 }
 
-function ensure() {
-  ensureDir();
-  if (!fs.existsSync(FILE())) writeAll(seed());
+// Upsert a KV row's `value`.
+async function kvSet(key, value) {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from(TABLE)
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) throw new Error(`crm_store write failed (${key}): ${error.message}`);
+  return value;
 }
 
 function seed() {
@@ -68,18 +79,19 @@ function normalize(r) {
   };
 }
 
-function readAll() {
-  ensure();
-  try {
-    return JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-  } catch {
-    return [];
+// Read all leads, seeding the 3 demo leads the first time (key absent).
+async function readAll() {
+  const existing = await kvGet('leads', null);
+  if (existing === null) {
+    const seeded = seed();
+    await kvSet('leads', seeded);
+    return seeded;
   }
+  return existing;
 }
 
-function writeAll(leads) {
-  ensureDir();
-  fs.writeFileSync(FILE(), JSON.stringify(leads, null, 2));
+async function writeAll(leads) {
+  await kvSet('leads', leads);
   return leads;
 }
 
@@ -89,8 +101,8 @@ function nextId(leads) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export function list({ stage, q } = {}) {
-  let leads = readAll();
+export async function list({ stage, q } = {}) {
+  let leads = await readAll();
   if (stage && stage !== 'all') {
     const tab = STAGE_TABS.find((t) => t.key === stage);
     if (tab) leads = leads.filter(tab.match);
@@ -104,52 +116,52 @@ export function list({ stage, q } = {}) {
   return leads.sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
 }
 
-export function counts() {
-  const leads = readAll();
+export async function counts() {
+  const leads = await readAll();
   const out = {};
   for (const t of STAGE_TABS) out[t.key] = leads.filter(t.match).length;
   return out;
 }
 
-export function add(input) {
-  const leads = readAll();
+export async function add(input) {
+  const leads = await readAll();
   const lead = normalize({ ...input, id: nextId(leads), created_at: new Date().toISOString() });
   if (!lead.email && !lead.instagram) throw new Error('a lead needs an email or an instagram handle');
   leads.push(lead);
-  writeAll(leads);
+  await writeAll(leads);
   return lead;
 }
 
-export function update(id, patch) {
-  const leads = readAll();
+export async function update(id, patch) {
+  const leads = await readAll();
   const i = leads.findIndex((l) => l.id === Number(id));
   if (i === -1) throw new Error(`lead ${id} not found`);
   leads[i] = normalize({ ...leads[i], ...patch, id: leads[i].id, created_at: leads[i].created_at });
-  writeAll(leads);
+  await writeAll(leads);
   return leads[i];
 }
 
-export function remove(id) {
-  const leads = readAll().filter((l) => l.id !== Number(id));
-  writeAll(leads);
+export async function remove(id) {
+  const leads = (await readAll()).filter((l) => l.id !== Number(id));
+  await writeAll(leads);
   return { ok: true };
 }
 
 // Advance a lead to `contacted` after a successful send (stage-guarded, like
 // zinga's operator_crm_mark_sent — only promotes from `new`).
-export function markContacted(id, subject) {
-  const leads = readAll();
+export async function markContacted(id, subject) {
+  const leads = await readAll();
   const i = leads.findIndex((l) => l.id === Number(id));
   if (i === -1) return;
   if (leads[i].stage === 'new') leads[i].stage = 'contacted';
   leads[i].contacted_at = new Date().toISOString();
   if (subject) leads[i].subject = subject;
-  writeAll(leads);
+  await writeAll(leads);
 }
 
 // Import a CSV (columns: email/to_email, business/name, category, instagram, …).
-export function importCsv(rows) {
-  const leads = readAll();
+export async function importCsv(rows) {
+  const leads = await readAll();
   let added = 0;
   for (const r of rows) {
     const email = (r.email || r.to_email || '').trim();
@@ -174,35 +186,30 @@ export function importCsv(rows) {
     );
     added++;
   }
-  writeAll(leads);
+  await writeAll(leads);
   return { added };
 }
 
 // ── Sends + activity log (feeds the dashboard) ───────────────────────────────
-function readJson(file, fallback) {
-  ensureDir();
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
-function writeJson(file, val) { ensureDir(); fs.writeFileSync(file, JSON.stringify(val, null, 2)); }
 
-export function logSend({ to, subject, status, source }) {
-  const sends = readJson(SENDS(), []);
+export async function logSend({ to, subject, status, source }) {
+  const sends = await kvGet('sends', []);
   sends.push({ at: new Date().toISOString(), to, subject: subject || '', status, source: source || '' });
-  writeJson(SENDS(), sends);
+  await kvSet('sends', sends);
 }
 
-export function logActivity({ type, text }) {
-  const acts = readJson(ACTIVITY(), []);
+export async function logActivity({ type, text }) {
+  const acts = await kvGet('activity', []);
   acts.unshift({ at: new Date().toISOString(), type, text });
-  writeJson(ACTIVITY(), acts.slice(0, 100));
+  await kvSet('activity', acts.slice(0, 100));
 }
 
-// Aggregate everything the dashboard/home page needs, from real local data.
-export function dashboard() {
-  const leads = readAll();
-  const sends = readJson(SENDS(), []);
-  const acts = readJson(ACTIVITY(), []);
-  const c = counts();
+// Aggregate everything the dashboard/home page needs, from real data.
+export async function dashboard() {
+  const leads = await readAll();
+  const sends = await kvGet('sends', []);
+  const acts = await kvGet('activity', []);
+  const c = await counts();
   const sent = sends.filter((s) => s.status === 'sent');
 
   // 7-day window (oldest → today)
@@ -233,9 +240,10 @@ export function dashboard() {
     if (l.stage === 'replied') bySource[k].replied++;
   }
   const segments = Object.values(bySource).sort((a, b) => b.recipients - a.recipients);
-  const campaigns = listCampaigns();
+  const campaigns = await listCampaigns();
 
   const failed = sends.filter((s) => s.status === 'failed').length;
+  const lastBlast = await kvGet('last-blast', null);
 
   return {
     metrics: {
@@ -263,18 +271,18 @@ export function dashboard() {
     campaigns,
     segments,
     activity: acts.slice(0, 8),
-    lastBlast: readJson(path.join(DATA_DIR(), 'last-blast.json'), null),
+    lastBlast,
   };
 }
 
-export function setLastBlast(summary) {
-  writeJson(path.join(DATA_DIR(), 'last-blast.json'), { ...summary, at: new Date().toISOString() });
+export async function setLastBlast(summary) {
+  await kvSet('last-blast', { ...summary, at: new Date().toISOString() });
 }
 
 // ── Campaigns ────────────────────────────────────────────────────────────────
 // Resolve which leads a campaign's audience filter targets (real data).
-export function resolveAudience(f = {}) {
-  let leads = readAll();
+export async function resolveAudience(f = {}) {
+  let leads = await readAll();
   if (f.ids && f.ids.length) return leads.filter((l) => f.ids.includes(l.id));
   if (f.stage && f.stage !== 'all') {
     const tab = STAGE_TABS.find((t) => t.key === f.stage);
@@ -290,16 +298,16 @@ export function resolveAudience(f = {}) {
   return leads;
 }
 
-export function listCampaigns() {
-  return readJson(CAMP(), []).sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+export async function listCampaigns() {
+  return (await kvGet('campaigns', [])).sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
 }
 
-export function getCampaign(id) {
-  return readJson(CAMP(), []).find((c) => c.id === Number(id)) || null;
+export async function getCampaign(id) {
+  return (await kvGet('campaigns', [])).find((c) => c.id === Number(id)) || null;
 }
 
-export function addCampaign(data) {
-  const cs = readJson(CAMP(), []);
+export async function addCampaign(data) {
+  const cs = await kvGet('campaigns', []);
   const id = cs.reduce((m, c) => Math.max(m, c.id || 0), 0) + 1;
   const rec = {
     id,
@@ -322,23 +330,23 @@ export function addCampaign(data) {
     sent_at: null,
     scheduled_at: data.scheduled_at || null,
   };
-  rec.recipients = resolveAudience(rec.audience).length;
+  rec.recipients = (await resolveAudience(rec.audience)).length;
   cs.push(rec);
-  writeJson(CAMP(), cs);
+  await kvSet('campaigns', cs);
   return rec;
 }
 
-export function updateCampaign(id, patch) {
-  const cs = readJson(CAMP(), []);
+export async function updateCampaign(id, patch) {
+  const cs = await kvGet('campaigns', []);
   const i = cs.findIndex((c) => c.id === Number(id));
   if (i === -1) throw new Error(`campaign ${id} not found`);
   cs[i] = { ...cs[i], ...patch, id: cs[i].id, created_at: cs[i].created_at };
-  writeJson(CAMP(), cs);
+  await kvSet('campaigns', cs);
   return cs[i];
 }
 
-export function campaignCounts() {
-  const cs = listCampaigns();
+export async function campaignCounts() {
+  const cs = await listCampaigns();
   return {
     all: cs.length,
     sending: cs.filter((c) => c.status === 'sending').length,

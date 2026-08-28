@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const c = store.getCampaign(id);
+  const c = await store.getCampaign(id);
   if (!c) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json(c);
 }
@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = await req.json();
-    return NextResponse.json(store.updateCampaign(id, body));
+    return NextResponse.json(await store.updateCampaign(id, body));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }

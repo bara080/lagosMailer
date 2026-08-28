@@ -30,5 +30,5 @@ function parseCsv(txt: string) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  return NextResponse.json(store.importCsv(parseCsv(body.csv || '')));
+  return NextResponse.json(await store.importCsv(parseCsv(body.csv || '')));
 }

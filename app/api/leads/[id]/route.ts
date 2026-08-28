@@ -8,7 +8,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = await req.json();
-    return NextResponse.json(store.update(id, body));
+    return NextResponse.json(await store.update(id, body));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
@@ -16,5 +16,5 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return NextResponse.json(store.remove(id));
+  return NextResponse.json(await store.remove(id));
 }
