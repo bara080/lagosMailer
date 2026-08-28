@@ -103,10 +103,34 @@ export const api = {
   campaign: (id: number) => req<Campaign>(`/api/campaigns/${id}`),
   createCampaign: (body: Partial<Campaign>) => req<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) }),
   updateCampaign: (id: number, body: Partial<Campaign>) => req<Campaign>(`/api/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  sendCampaign: (id: number, dryRun: boolean) =>
-    req<{ sent: number; total: number; dryRun: boolean; results: any[] }>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun }) }),
+  // Sends ONE batch and returns progress. Use sendCampaignAll() to run a whole
+  // campaign (it loops this until `done`).
+  sendCampaignBatch: (id: number, dryRun: boolean, size?: number) =>
+    req<SendProgress>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun, size }) }),
   blast: (body: { ids: number[]; subject: string; html: string; text: string; dryRun: boolean }) =>
     req<{ sent: number; total: number; dryRun: boolean; results: any[] }>('/api/blast', { method: 'POST', body: JSON.stringify(body) }),
   sms: (body: { ids: number[]; text: string; dryRun: boolean }) =>
     req<{ sent: number; total: number; dryRun: boolean; smsReady: boolean; results: any[] }>('/api/sms', { method: 'POST', body: JSON.stringify(body) }),
 };
+
+// Progress from one send batch.
+export interface SendProgress {
+  done: boolean; dryRun: boolean; sent: number; sentNow: number;
+  total: number; remaining: number; smtpReady: boolean; results: any[];
+}
+
+// Run a whole campaign by looping batches until done, reporting progress after
+// each batch. A dry run returns in a single call. Large audiences are delivered
+// across several short requests so none of them times out.
+export async function sendCampaignAll(
+  id: number,
+  opts: { dryRun: boolean; onProgress?: (p: SendProgress) => void } = { dryRun: false },
+): Promise<SendProgress> {
+  let last: SendProgress;
+  do {
+    last = await api.sendCampaignBatch(id, opts.dryRun, opts.dryRun ? undefined : undefined);
+    opts.onProgress?.(last);
+    if (opts.dryRun) break;
+  } while (!last.done);
+  return last;
+}

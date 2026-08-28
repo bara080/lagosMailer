@@ -1,6 +1,6 @@
 'use client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Campaign, type Lead } from './api';
+import { api, sendCampaignAll, type Campaign, type Lead, type SendProgress } from './api';
 
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: 300_000 });
@@ -81,7 +81,8 @@ export function useCreateCampaign() {
 export function useSendCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, dryRun }: { id: number; dryRun: boolean }) => api.sendCampaign(id, dryRun),
+    mutationFn: ({ id, dryRun, onProgress }: { id: number; dryRun: boolean; onProgress?: (p: SendProgress) => void }) =>
+      sendCampaignAll(id, { dryRun, onProgress }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       qc.invalidateQueries({ queryKey: ['leads'] });

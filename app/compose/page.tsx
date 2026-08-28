@@ -1,24 +1,55 @@
 'use client';
 import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles } from 'lucide-react';
+import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useCreateCampaign, useLeads, useSendCampaign } from '@/lib/hooks';
-import type { Lead } from '@/lib/api';
+import type { Lead, SendProgress } from '@/lib/api';
 
-// Personalization tokens shown to the user with PLAIN-LANGUAGE labels. The
-// friendly label is what a non-developer clicks; the `token` is what actually
-// gets inserted and replaced per-recipient at send time (see render()).
+// Personalization is shown to non-developers as READABLE tokens like
+// "[First name]" — never raw `{{name}}` and never HTML. The user types plain
+// text; on send we convert these friendly tokens to the backend `{{…}}` tokens
+// and wrap the plain text into HTML (see toBackend/plainToHtml + finalize()).
 const TOKENS = [
-  { label: 'First name', token: '{{name}}' },
-  { label: 'Business name', token: '{{business}}' },
-  { label: 'Category', token: '{{category}}' },
-  { label: 'Email address', token: '{{email}}' },
+  { label: 'First name', token: '[First name]', backend: '{{name}}' },
+  { label: 'Business name', token: '[Business]', backend: '{{business}}' },
+  { label: 'Category', token: '[Category]', backend: '{{category}}' },
+  { label: 'Email address', token: '[Email]', backend: '{{email}}' },
 ];
 
-// A friendly "click to add" row. Inserts a token at the caret of the field the
-// user last had focused (so it drops in exactly where they're typing), instead
-// of forcing them to type `{{business}}` by hand.
+const STAGES = [
+  { key: 'all', label: 'All leads' }, { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' },
+  { key: 'replied', label: 'Replied' }, { key: 'qualified', label: 'Qualified' }, { key: 'won', label: 'Won' },
+];
+
+// Resolve friendly tokens to a sample contact's real values — used for the
+// live preview so the user sees exactly what each person receives.
+function fill(tpl: string, l: Partial<Lead>) {
+  return (tpl || '')
+    .replaceAll('[First name]', l.name || 'there')
+    .replaceAll('[Business]', l.business || 'your business')
+    .replaceAll('[Category]', l.category || '')
+    .replaceAll('[Email]', l.email || '');
+}
+
+// Convert friendly tokens → the backend `{{…}}` tokens the mailer understands.
+function toBackend(tpl: string) {
+  let out = tpl || '';
+  for (const t of TOKENS) out = out.replaceAll(t.token, t.backend);
+  return out;
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Turn a plain-text message (blank line = new paragraph, single newline = line
+// break) into safe HTML. User text is escaped; the `{{…}}` tokens pass through.
+function plainToHtml(text: string) {
+  const body = escapeHtml((text || '').trim());
+  return body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('\n');
+}
+
+// A friendly "click to add" row. Inserts a readable token at the caret of the
+// field the user last had focused, so it drops in exactly where they're typing.
 function InsertBar({ onInsert }: { onInsert: (token: string) => void }) {
   return (
     <div className="insert-bar">
@@ -31,16 +62,6 @@ function InsertBar({ onInsert }: { onInsert: (token: string) => void }) {
     </div>
   );
 }
-const STAGES = [
-  { key: 'all', label: 'All leads' }, { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' },
-  { key: 'replied', label: 'Replied' }, { key: 'qualified', label: 'Qualified' }, { key: 'won', label: 'Won' },
-];
-
-function render(tpl: string, l: Partial<Lead>) {
-  return (tpl || '')
-    .replaceAll('{{name}}', l.name || 'there').replaceAll('{{business}}', l.business || 'your business')
-    .replaceAll('{{category}}', l.category || '').replaceAll('{{email}}', l.email || '');
-}
 
 function ComposeInner() {
   const router = useRouter();
@@ -50,22 +71,23 @@ function ComposeInner() {
   const [step, setStep] = useState(1);
   const [stage, setStage] = useState('all');
   const [form, setForm] = useState({
-    name: 'New campaign', fromName: '', replyTo: '', subject: 'Quick question about {{business}}',
-    html: '<p>Hi {{name}},</p>\n<p>I came across {{business}} and think we can help.</p>\n<p>Best,<br>The lagosMailer Team</p>',
-    text: 'Hi {{name}}, I came across {{business}} and think we can help. Best, The lagosMailer Team',
+    name: 'New campaign', fromName: '', replyTo: '',
+    subject: 'Quick question about [Business]',
+    message: 'Hi [First name],\n\nI came across [Business] and think we can help.\n\nBest,\nThe lagosMailer Team',
   });
   const set = (k: string) => (e: any) => setForm({ ...form, [k]: e.target.value });
   const [result, setResult] = useState<any>(null);
+  const [progress, setProgress] = useState<SendProgress | null>(null);
 
   // Refs to the editable fields, so "Add a detail" inserts at the caret of the
   // field the user is actually editing.
   const subjectRef = useRef<HTMLInputElement>(null);
-  const htmlRef = useRef<HTMLTextAreaElement>(null);
-  const [focusField, setFocusField] = useState<'subject' | 'html'>('html');
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const [focusField, setFocusField] = useState<'subject' | 'message'>('message');
 
   function insertToken(token: string) {
     const field = focusField;
-    const el = field === 'subject' ? subjectRef.current : htmlRef.current;
+    const el = field === 'subject' ? subjectRef.current : messageRef.current;
     if (!el) { setForm((f) => ({ ...f, [field]: (f as any)[field] + token })); return; }
     const start = el.selectionStart ?? el.value.length;
     const end = el.selectionEnd ?? start;
@@ -88,23 +110,32 @@ function ComposeInner() {
     return base.filter((l) => l.email && l.stage !== 'unsub');
   }, [leadData, ids, stage]);
   const sample = recipients[0] ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' };
+  const sampleLabel = sample.name || sample.business || 'a contact';
 
   const audience = ids.length ? { ids } : { stage };
 
   async function finalize(dryRun: boolean) {
+    setResult(null);
+    setProgress(dryRun ? null : { done: false, dryRun: false, sent: 0, sentNow: 0, total: recipients.length, remaining: recipients.length, smtpReady: true, results: [] });
     const camp = await create.mutateAsync({
-      name: form.name, subject: form.subject, html: form.html, text: form.text,
+      name: form.name,
+      subject: toBackend(form.subject),
+      html: plainToHtml(toBackend(form.message)),
+      text: toBackend(form.message),
       fromName: form.fromName, replyTo: form.replyTo, audience, status: 'draft',
     } as any);
-    const out = await send.mutateAsync({ id: camp.id, dryRun });
+    const out = await send.mutateAsync({ id: camp.id, dryRun, onProgress: (p) => setProgress(p) });
+    setProgress(null);
     setResult({ ...out, name: form.name });
   }
+  const sending = send.isPending && progress && !progress.dryRun;
 
   return (
     <>
       <Topbar title="Compose Campaign"
         actions={<>
           <button className="btn ghost" onClick={() => router.push('/campaigns')}>Save Draft</button>
+          {step > 1 && <button className="btn ghost" onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>}
           {step < 3 ? <button className="btn" onClick={() => setStep(step + 1)}>Next →</button>
             : <button className="btn" disabled={send.isPending || create.isPending} onClick={() => finalize(false)}><Send size={15} /> Send campaign</button>}
         </>} />
@@ -149,11 +180,11 @@ function ComposeInner() {
             <div className="card pad">
               <h3 style={{ marginTop: 0 }}>Personalize each email</h3>
               <p className="muted" style={{ fontSize: 13 }}>
-                Add a contact’s details and they fill in automatically for every person — so “Business name” becomes each contact’s real business.
+                Drop in a contact’s details and they fill in automatically for every person — so “Business name” becomes each contact’s real business.
               </p>
               <div className="pill-tabs mt12">
                 {TOKENS.map((t) => (
-                  <span key={t.token} className="chip insert" style={{ cursor: 'pointer' }} onClick={() => setForm((f) => ({ ...f, html: f.html + ' ' + t.token }))}>
+                  <span key={t.token} className="chip insert" style={{ cursor: 'pointer' }} onClick={() => setForm((f) => ({ ...f, message: f.message + (f.message.endsWith('\n') || !f.message ? '' : ' ') + t.token }))}>
                     + {t.label}
                   </span>
                 ))}
@@ -177,7 +208,7 @@ function ComposeInner() {
               <div className="insert-panel mt16">
                 <InsertBar onInsert={insertToken} />
                 <p className="faint" style={{ fontSize: 11.5, margin: '6px 2px 0' }}>
-                  Click a button to drop a contact’s detail into whichever box you’re editing. It fills in automatically per person — see the preview →
+                  Click a button to drop a contact’s detail into whichever box you’re editing. It fills in automatically for each person — watch the preview →
                 </p>
               </div>
 
@@ -185,16 +216,17 @@ function ComposeInner() {
                 <input ref={subjectRef} className="input" value={form.subject} onChange={set('subject')} onFocus={() => setFocusField('subject')} />
               </label>
               <label className="field mt12"><span>Message</span>
-                <textarea ref={htmlRef} className="input" style={{ minHeight: 150 }} value={form.html} onChange={set('html')} onFocus={() => setFocusField('html')} />
+                <textarea ref={messageRef} className="input" style={{ minHeight: 190 }} value={form.message} onChange={set('message')} onFocus={() => setFocusField('message')} placeholder="Write your email here. Press Enter for a new line." />
               </label>
-              <label className="field mt12"><span>Plain-text fallback <small className="faint">(optional)</small></span><textarea className="input" style={{ minHeight: 80 }} value={form.text} onChange={set('text')} /></label>
+              <p className="faint" style={{ fontSize: 11.5, marginTop: -2 }}>Just type normally — no code needed. A blank line starts a new paragraph.</p>
             </div>
             <div className="card pad">
-              <div className="row between"><h3 style={{ marginTop: 0 }}>Preview</h3><span className="muted" style={{ fontSize: 12 }}>as {sample.name}</span></div>
+              <div className="row between"><h3 style={{ marginTop: 0 }}>Preview</h3><span className="muted" style={{ fontSize: 12 }}>as {sampleLabel}</span></div>
               <div className="card mt12" style={{ background: '#fff', color: '#111', padding: 18, borderRadius: 8 }}>
-                <div style={{ fontWeight: 700, marginBottom: 10 }}>{render(form.subject, sample)}</div>
-                <div dangerouslySetInnerHTML={{ __html: render(form.html, sample) }} />
+                <div style={{ fontWeight: 700, marginBottom: 10 }}>{fill(form.subject, sample)}</div>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{fill(form.message, sample)}</div>
               </div>
+              <p className="faint mt12" style={{ fontSize: 12 }}>This is the real email {sampleLabel} will receive. Everyone else gets their own details filled in.</p>
             </div>
           </div>
         )}
@@ -211,6 +243,17 @@ function ComposeInner() {
                   <div className="card pad" style={{ opacity: .5 }}><div className="row gap8"><FlaskConical size={16} /> <b>A/B Test</b></div><small className="muted">Pro feature</small></div>
                 </div>
               </div>
+              {sending && progress && (
+                <div className="card pad">
+                  <h3 style={{ marginTop: 0 }}>Sending…</h3>
+                  <div className="row between" style={{ fontSize: 13 }}>
+                    <span className="muted">{progress.sent.toLocaleString()} of {progress.total.toLocaleString()} sent</span>
+                    <b>{progress.total ? Math.round((progress.sent / progress.total) * 100) : 0}%</b>
+                  </div>
+                  <div className="bar blue mt8"><span style={{ width: `${progress.total ? (progress.sent / progress.total) * 100 : 0}%` }} /></div>
+                  <p className="faint mt8" style={{ fontSize: 12 }}>Keep this tab open until it finishes — large lists send in batches.</p>
+                </div>
+              )}
               {result && (
                 <div className="card pad">
                   <h3 style={{ marginTop: 0 }}>Result</h3>
@@ -226,7 +269,7 @@ function ComposeInner() {
               <h3 style={{ marginTop: 0 }}>Campaign Summary</h3>
               <div className="kv"><span className="k">Recipients</span><b>{recipients.length.toLocaleString()}</b></div>
               <div className="kv"><span className="k">Campaign</span><span>{form.name}</span></div>
-              <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{render(form.subject, sample)}</span></div>
+              <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{fill(form.subject, sample)}</span></div>
               <div className="kv"><span className="k">Track Opens</span><span className="faint">soon</span></div>
               <button className="btn ghost mt16" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
               <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={() => finalize(false)}><Zap size={15} /> Send now</button>
