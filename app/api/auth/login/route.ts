@@ -13,10 +13,33 @@ import {
 // against env vars for a zero-dependency local setup, keeping the same
 // signed-cookie session mechanism.
 
-const AUTH_EMAIL = process.env.AUTH_EMAIL || 'admin@lagosmailer.com';
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'admin';
-// The single env-configured account is a full operator.
-const AUTH_ROLE: Role = 'admin';
+// Operator accounts. Emails are fixed here (they aren't secrets); passwords come
+// from env so real credentials never live in the repo. Add/adjust accounts here.
+type Account = { email: string; password: string; role: Role };
+
+function accounts(): Account[] {
+  const list: Account[] = [
+    {
+      email: (process.env.SUPERADMIN_EMAIL || 'baraahmad232@gmail.com').toLowerCase(),
+      password: process.env.SUPERADMIN_PASSWORD || 'admin',
+      role: 'superadmin',
+    },
+    {
+      email: (process.env.ADMIN_EMAIL || 'googs000@gmail.com').toLowerCase(),
+      password: process.env.ADMIN_PASSWORD || 'admin',
+      role: 'admin',
+    },
+  ];
+  // Optional legacy single-account override (AUTH_EMAIL/AUTH_PASSWORD).
+  if (process.env.AUTH_EMAIL && process.env.AUTH_PASSWORD) {
+    list.push({
+      email: process.env.AUTH_EMAIL.toLowerCase(),
+      password: process.env.AUTH_PASSWORD,
+      role: (process.env.AUTH_ROLE as Role) || 'admin',
+    });
+  }
+  return list;
+}
 
 // Constant-time-ish string comparison to avoid trivial timing leaks.
 function safeEqual(a: string, b: string): boolean {
@@ -29,29 +52,29 @@ function safeEqual(a: string, b: string): boolean {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
-    const email = typeof body?.email === 'string' ? body.email.trim() : '';
+    const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body?.password === 'string' ? body.password : '';
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const emailOk = safeEqual(email.toLowerCase(), AUTH_EMAIL.toLowerCase());
-    const passOk = safeEqual(password, AUTH_PASSWORD);
-    if (!emailOk || !passOk) {
+    // Match on email, then verify password (safeEqual on both to reduce timing leaks).
+    const acct = accounts().find((a) => safeEqual(a.email, email));
+    if (!acct || !safeEqual(password, acct.password)) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
     }
 
     const token = await signToken({
-      _id: AUTH_EMAIL,
-      email: AUTH_EMAIL,
-      displayName: AUTH_EMAIL.split('@')[0] || 'admin',
-      role: AUTH_ROLE,
+      _id: acct.email,
+      email: acct.email,
+      displayName: acct.email.split('@')[0] || 'user',
+      role: acct.role,
     });
 
     const res = NextResponse.json({
       ok: true,
-      user: { _id: AUTH_EMAIL, email: AUTH_EMAIL, role: AUTH_ROLE },
+      user: { _id: acct.email, email: acct.email, role: acct.role },
     });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
