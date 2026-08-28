@@ -1,0 +1,8 @@
+Hey {{name}},
+
+This is your email blast body. Edit this template freely.
+
+Best,
+The Team
+
+Reply "unsubscribe" if not relevant.

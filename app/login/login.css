@@ -1,0 +1,118 @@
+/*
+ * Scoped styles for the login page ONLY. Imported directly by
+ * app/login/page.tsx so it does not collide with the app-wide app/globals.css
+ * (authored separately). Uses the shared dark-theme CSS variables when present,
+ * with sensible fallbacks so the page renders even before globals.css loads.
+ */
+
+.lm-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg, #0b0d10);
+  color: var(--text, #e6e8eb);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+.lm-login__card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface, #14171c);
+  border: 1px solid var(--border, #262b33);
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+.lm-login__title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text, #e6e8eb);
+}
+
+.lm-login__subtitle {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--text-dim, #8b93a1);
+}
+
+.lm-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.lm-login__label {
+  font-size: 13px;
+  color: var(--text-dim, #8b93a1);
+}
+
+.lm-login__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text, #e6e8eb);
+  background: var(--bg, #0b0d10);
+  border: 1px solid var(--border, #262b33);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.lm-login__input:focus {
+  border-color: var(--accent, #4f8cff);
+}
+
+.lm-login__input::placeholder {
+  color: var(--text-dim, #8b93a1);
+  opacity: 0.7;
+}
+
+.lm-login__error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--red, #ff5c5c);
+  background: color-mix(in srgb, var(--red, #ff5c5c) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red, #ff5c5c) 40%, transparent);
+  border-radius: 8px;
+}
+
+.lm-login__notice {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-dim, #8b93a1);
+  background: var(--bg, #0b0d10);
+  border: 1px solid var(--border, #262b33);
+  border-radius: 8px;
+}
+
+.lm-login__button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #4f8cff);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.lm-login__button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.lm-login__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

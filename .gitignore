@@ -1,0 +1,9 @@
+.env
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+sent-log.csv
+recipients.csv
+data/
+.DS_Store

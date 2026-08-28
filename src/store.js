@@ -1,0 +1,350 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local lead store — the CRM data layer.
+//
+// Ported from zinga-os `ops.leads` (Supabase Postgres) but backed by a local
+// JSON file so it runs on localhost with zero external services. Same record
+// shape and same stage lifecycle; the storage engine is the only thing swapped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Stage lifecycle (copied from zinga-os, trimmed to the load-bearing stages).
+export const STAGES = ['new', 'contacted', 'replied', 'qualified', 'won', 'unsub'];
+
+// Tabs group stages the way the zinga CRM does.
+export const STAGE_TABS = [
+  { key: 'all', label: 'All', match: () => true },
+  { key: 'new', label: 'New', match: (l) => l.stage === 'new' },
+  { key: 'contacted', label: 'Contacted', match: (l) => l.stage === 'contacted' },
+  { key: 'replied', label: 'Replied', match: (l) => l.stage === 'replied' },
+  { key: 'qualified', label: 'Qualified', match: (l) => l.stage === 'qualified' },
+  { key: 'won', label: 'Won', match: (l) => l.stage === 'won' },
+];
+
+const DATA_DIR = () => path.join(process.cwd(), 'data');
+const FILE = () => path.join(DATA_DIR(), 'leads.json');
+const SENDS = () => path.join(DATA_DIR(), 'sends.json');
+const ACTIVITY = () => path.join(DATA_DIR(), 'activity.json');
+const CAMP = () => path.join(DATA_DIR(), 'campaigns.json');
+
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR())) fs.mkdirSync(DATA_DIR(), { recursive: true });
+}
+
+function ensure() {
+  ensureDir();
+  if (!fs.existsSync(FILE())) writeAll(seed());
+}
+
+function seed() {
+  const now = new Date().toISOString();
+  return [
+    { business: 'Lagos Cuts Barber', email: 'demo1@example.com', name: 'Tunde', category: 'barber', stage: 'new' },
+    { business: 'Ikeja Nail Studio', email: 'demo2@example.com', name: 'Ada', category: 'salon', stage: 'new' },
+    { business: 'Victoria Island Spa', email: 'demo3@example.com', name: 'Ngozi', category: 'spa', stage: 'contacted' },
+  ].map((r, i) => normalize({ id: i + 1, created_at: now, ...r }));
+}
+
+// Fill in every field so the UI never sees `undefined`.
+function normalize(r) {
+  return {
+    id: r.id,
+    business: r.business || '',
+    name: r.name || r.owner || '',
+    email: r.email || '',
+    phone: r.phone || '',
+    instagram: r.instagram || '',
+    website: r.website || '',
+    borough: r.borough || '',
+    category: r.category || '',
+    source: r.source || 'manual',
+    stage: STAGES.includes(r.stage) ? r.stage : 'new',
+    subject: r.subject || '',
+    notes: r.notes || '',
+    contacted_at: r.contacted_at || null,
+    replied_at: r.replied_at || null,
+    created_at: r.created_at || new Date().toISOString(),
+  };
+}
+
+function readAll() {
+  ensure();
+  try {
+    return JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeAll(leads) {
+  ensureDir();
+  fs.writeFileSync(FILE(), JSON.stringify(leads, null, 2));
+  return leads;
+}
+
+function nextId(leads) {
+  return leads.reduce((m, l) => Math.max(m, l.id || 0), 0) + 1;
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+export function list({ stage, q } = {}) {
+  let leads = readAll();
+  if (stage && stage !== 'all') {
+    const tab = STAGE_TABS.find((t) => t.key === stage);
+    if (tab) leads = leads.filter(tab.match);
+  }
+  if (q) {
+    const s = q.toLowerCase();
+    leads = leads.filter((l) =>
+      [l.business, l.name, l.email, l.category, l.instagram].some((v) => (v || '').toLowerCase().includes(s)),
+    );
+  }
+  return leads.sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+}
+
+export function counts() {
+  const leads = readAll();
+  const out = {};
+  for (const t of STAGE_TABS) out[t.key] = leads.filter(t.match).length;
+  return out;
+}
+
+export function add(input) {
+  const leads = readAll();
+  const lead = normalize({ ...input, id: nextId(leads), created_at: new Date().toISOString() });
+  if (!lead.email && !lead.instagram) throw new Error('a lead needs an email or an instagram handle');
+  leads.push(lead);
+  writeAll(leads);
+  return lead;
+}
+
+export function update(id, patch) {
+  const leads = readAll();
+  const i = leads.findIndex((l) => l.id === Number(id));
+  if (i === -1) throw new Error(`lead ${id} not found`);
+  leads[i] = normalize({ ...leads[i], ...patch, id: leads[i].id, created_at: leads[i].created_at });
+  writeAll(leads);
+  return leads[i];
+}
+
+export function remove(id) {
+  const leads = readAll().filter((l) => l.id !== Number(id));
+  writeAll(leads);
+  return { ok: true };
+}
+
+// Advance a lead to `contacted` after a successful send (stage-guarded, like
+// zinga's operator_crm_mark_sent — only promotes from `new`).
+export function markContacted(id, subject) {
+  const leads = readAll();
+  const i = leads.findIndex((l) => l.id === Number(id));
+  if (i === -1) return;
+  if (leads[i].stage === 'new') leads[i].stage = 'contacted';
+  leads[i].contacted_at = new Date().toISOString();
+  if (subject) leads[i].subject = subject;
+  writeAll(leads);
+}
+
+// Import a CSV (columns: email/to_email, business/name, category, instagram, …).
+export function importCsv(rows) {
+  const leads = readAll();
+  let added = 0;
+  for (const r of rows) {
+    const email = (r.email || r.to_email || '').trim();
+    const instagram = (r.instagram || '').trim();
+    if (!email && !instagram) continue;
+    if (email && leads.some((l) => l.email.toLowerCase() === email.toLowerCase())) continue; // dedup
+    leads.push(
+      normalize({
+        id: nextId(leads),
+        business: r.business || r.business_name || '',
+        name: r.name || r.owner || '',
+        email,
+        instagram,
+        phone: r.phone || '',
+        website: r.website || '',
+        category: r.category || '',
+        borough: r.borough || '',
+        source: r.source || 'import',
+        subject: r.subject || '',
+        created_at: new Date().toISOString(),
+      }),
+    );
+    added++;
+  }
+  writeAll(leads);
+  return { added };
+}
+
+// ── Sends + activity log (feeds the dashboard) ───────────────────────────────
+function readJson(file, fallback) {
+  ensureDir();
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+function writeJson(file, val) { ensureDir(); fs.writeFileSync(file, JSON.stringify(val, null, 2)); }
+
+export function logSend({ to, subject, status, source }) {
+  const sends = readJson(SENDS(), []);
+  sends.push({ at: new Date().toISOString(), to, subject: subject || '', status, source: source || '' });
+  writeJson(SENDS(), sends);
+}
+
+export function logActivity({ type, text }) {
+  const acts = readJson(ACTIVITY(), []);
+  acts.unshift({ at: new Date().toISOString(), type, text });
+  writeJson(ACTIVITY(), acts.slice(0, 100));
+}
+
+// Aggregate everything the dashboard/home page needs, from real local data.
+export function dashboard() {
+  const leads = readAll();
+  const sends = readJson(SENDS(), []);
+  const acts = readJson(ACTIVITY(), []);
+  const c = counts();
+  const sent = sends.filter((s) => s.status === 'sent');
+
+  // 7-day window (oldest → today)
+  const days = [];
+  const today = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({
+      key,
+      label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      sent: sent.filter((s) => s.at.slice(0, 10) === key).length,
+      replies: leads.filter((l) => l.replied_at && l.replied_at.slice(0, 10) === key).length,
+    });
+  }
+  const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+  const newThisWeek = leads.filter((l) => new Date(l.created_at) >= weekAgo).length;
+  const sentThisWeek = sent.filter((s) => new Date(s.at) >= weekAgo).length;
+
+  // "Campaigns" derived from the lead `source` segments (real data).
+  const bySource = {};
+  for (const l of leads) {
+    const k = l.source || 'manual';
+    bySource[k] = bySource[k] || { name: k, recipients: 0, sent: 0, replied: 0 };
+    bySource[k].recipients++;
+    if (l.contacted_at) bySource[k].sent++;
+    if (l.stage === 'replied') bySource[k].replied++;
+  }
+  const segments = Object.values(bySource).sort((a, b) => b.recipients - a.recipients);
+  const campaigns = listCampaigns();
+
+  const failed = sends.filter((s) => s.status === 'failed').length;
+
+  return {
+    metrics: {
+      totalLeads: leads.length,
+      newLeads: c.new,
+      newThisWeek,
+      emailsSent: sent.length,
+      sentThisWeek,
+      delivered: sent.length, // SMTP-accepted; open/bounce tracking not wired
+      opens: 0,
+      replies: c.replied,
+      qualified: c.qualified,
+      won: c.won,
+      bounces: failed,
+      unsubscribes: leads.filter((l) => l.stage === 'unsub').length,
+    },
+    series: days,
+    stageDonut: [
+      { key: 'new', label: 'New', value: c.new },
+      { key: 'contacted', label: 'Contacted', value: c.contacted },
+      { key: 'replied', label: 'Replied', value: c.replied },
+      { key: 'qualified', label: 'Qualified', value: c.qualified },
+      { key: 'won', label: 'Won', value: c.won },
+    ],
+    campaigns,
+    segments,
+    activity: acts.slice(0, 8),
+    lastBlast: readJson(path.join(DATA_DIR(), 'last-blast.json'), null),
+  };
+}
+
+export function setLastBlast(summary) {
+  writeJson(path.join(DATA_DIR(), 'last-blast.json'), { ...summary, at: new Date().toISOString() });
+}
+
+// ── Campaigns ────────────────────────────────────────────────────────────────
+// Resolve which leads a campaign's audience filter targets (real data).
+export function resolveAudience(f = {}) {
+  let leads = readAll();
+  if (f.ids && f.ids.length) return leads.filter((l) => f.ids.includes(l.id));
+  if (f.stage && f.stage !== 'all') {
+    const tab = STAGE_TABS.find((t) => t.key === f.stage);
+    leads = tab ? leads.filter(tab.match) : leads.filter((l) => l.stage === f.stage);
+  }
+  if (f.category) leads = leads.filter((l) => (l.category || '').toLowerCase() === f.category.toLowerCase());
+  if (f.source) leads = leads.filter((l) => l.source === f.source);
+  if (f.q) {
+    const s = f.q.toLowerCase();
+    leads = leads.filter((l) => [l.business, l.name, l.email].some((v) => (v || '').toLowerCase().includes(s)));
+  }
+  if (f.emailOnly !== false) leads = leads.filter((l) => l.email && l.stage !== 'unsub');
+  return leads;
+}
+
+export function listCampaigns() {
+  return readJson(CAMP(), []).sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+}
+
+export function getCampaign(id) {
+  return readJson(CAMP(), []).find((c) => c.id === Number(id)) || null;
+}
+
+export function addCampaign(data) {
+  const cs = readJson(CAMP(), []);
+  const id = cs.reduce((m, c) => Math.max(m, c.id || 0), 0) + 1;
+  const rec = {
+    id,
+    name: data.name || 'Untitled campaign',
+    description: data.description || '',
+    subject: data.subject || '',
+    html: data.html || '',
+    text: data.text || '',
+    fromName: data.fromName || '',
+    replyTo: data.replyTo || '',
+    audience: data.audience || {},
+    status: data.status || 'draft', // draft | sending | completed | paused | scheduled
+    recipients: 0,
+    sent: 0,
+    delivered: 0,
+    opens: 0,
+    replied: 0,
+    bounces: 0,
+    created_at: new Date().toISOString(),
+    sent_at: null,
+    scheduled_at: data.scheduled_at || null,
+  };
+  rec.recipients = resolveAudience(rec.audience).length;
+  cs.push(rec);
+  writeJson(CAMP(), cs);
+  return rec;
+}
+
+export function updateCampaign(id, patch) {
+  const cs = readJson(CAMP(), []);
+  const i = cs.findIndex((c) => c.id === Number(id));
+  if (i === -1) throw new Error(`campaign ${id} not found`);
+  cs[i] = { ...cs[i], ...patch, id: cs[i].id, created_at: cs[i].created_at };
+  writeJson(CAMP(), cs);
+  return cs[i];
+}
+
+export function campaignCounts() {
+  const cs = listCampaigns();
+  return {
+    all: cs.length,
+    sending: cs.filter((c) => c.status === 'sending').length,
+    completed: cs.filter((c) => c.status === 'completed').length,
+    draft: cs.filter((c) => c.status === 'draft').length,
+    paused: cs.filter((c) => c.status === 'paused').length,
+    scheduled: cs.filter((c) => c.status === 'scheduled').length,
+  };
+}
