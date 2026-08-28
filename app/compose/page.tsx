@@ -1,12 +1,36 @@
 'use client';
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Check, Zap, Send, Clock, FlaskConical, Eye } from 'lucide-react';
+import { Users, Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useCreateCampaign, useLeads, useSendCampaign } from '@/lib/hooks';
 import type { Lead } from '@/lib/api';
 
-const VARS = ['{{name}}', '{{business}}', '{{category}}', '{{email}}'];
+// Personalization tokens shown to the user with PLAIN-LANGUAGE labels. The
+// friendly label is what a non-developer clicks; the `token` is what actually
+// gets inserted and replaced per-recipient at send time (see render()).
+const TOKENS = [
+  { label: 'First name', token: '{{name}}' },
+  { label: 'Business name', token: '{{business}}' },
+  { label: 'Category', token: '{{category}}' },
+  { label: 'Email address', token: '{{email}}' },
+];
+
+// A friendly "click to add" row. Inserts a token at the caret of the field the
+// user last had focused (so it drops in exactly where they're typing), instead
+// of forcing them to type `{{business}}` by hand.
+function InsertBar({ onInsert }: { onInsert: (token: string) => void }) {
+  return (
+    <div className="insert-bar">
+      <span className="insert-hint"><Sparkles size={12} /> Add a detail:</span>
+      {TOKENS.map((t) => (
+        <button type="button" key={t.token} className="chip insert" onClick={() => onInsert(t.token)}>
+          + {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 const STAGES = [
   { key: 'all', label: 'All leads' }, { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' },
   { key: 'replied', label: 'Replied' }, { key: 'qualified', label: 'Qualified' }, { key: 'won', label: 'Won' },
@@ -32,6 +56,27 @@ function ComposeInner() {
   });
   const set = (k: string) => (e: any) => setForm({ ...form, [k]: e.target.value });
   const [result, setResult] = useState<any>(null);
+
+  // Refs to the editable fields, so "Add a detail" inserts at the caret of the
+  // field the user is actually editing.
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const htmlRef = useRef<HTMLTextAreaElement>(null);
+  const [focusField, setFocusField] = useState<'subject' | 'html'>('html');
+
+  function insertToken(token: string) {
+    const field = focusField;
+    const el = field === 'subject' ? subjectRef.current : htmlRef.current;
+    if (!el) { setForm((f) => ({ ...f, [field]: (f as any)[field] + token })); return; }
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const next = el.value.slice(0, start) + token + el.value.slice(end);
+    setForm((f) => ({ ...f, [field]: next }));
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + token.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
 
   const create = useCreateCampaign();
   const send = useSendCampaign();
@@ -102,12 +147,18 @@ function ComposeInner() {
               )}
             </div>
             <div className="card pad">
-              <h3 style={{ marginTop: 0 }}>Personalize</h3>
-              <p className="muted" style={{ fontSize: 13 }}>These variables are replaced per-recipient in the subject and body.</p>
+              <h3 style={{ marginTop: 0 }}>Personalize each email</h3>
+              <p className="muted" style={{ fontSize: 13 }}>
+                Add a contact’s details and they fill in automatically for every person — so “Business name” becomes each contact’s real business.
+              </p>
               <div className="pill-tabs mt12">
-                {VARS.map((v) => <span key={v} className="chip" style={{ cursor: 'pointer' }} onClick={() => setForm((f) => ({ ...f, html: f.html + ' ' + v }))}>{v}</span>)}
+                {TOKENS.map((t) => (
+                  <span key={t.token} className="chip insert" style={{ cursor: 'pointer' }} onClick={() => setForm((f) => ({ ...f, html: f.html + ' ' + t.token }))}>
+                    + {t.label}
+                  </span>
+                ))}
               </div>
-              <p className="faint mt16" style={{ fontSize: 12 }}>Tip: click a variable to append it to the body, or type it anywhere.</p>
+              <p className="faint mt16" style={{ fontSize: 12 }}>You’ll write the message next — the live preview shows exactly what each person receives.</p>
             </div>
           </div>
         )}
@@ -122,9 +173,21 @@ function ComposeInner() {
                 <label className="field grow"><span>From name</span><input className="input" value={form.fromName} onChange={set('fromName')} placeholder="lagosMailer Team" /></label>
                 <label className="field grow"><span>Reply-To</span><input className="input" value={form.replyTo} onChange={set('replyTo')} placeholder="support@…" /></label>
               </div>
-              <label className="field mt12"><span>Subject line</span><input className="input" value={form.subject} onChange={set('subject')} /></label>
-              <label className="field mt12"><span>HTML body</span><textarea className="input" style={{ minHeight: 150 }} value={form.html} onChange={set('html')} /></label>
-              <label className="field mt12"><span>Plain-text fallback</span><textarea className="input" style={{ minHeight: 80 }} value={form.text} onChange={set('text')} /></label>
+
+              <div className="insert-panel mt16">
+                <InsertBar onInsert={insertToken} />
+                <p className="faint" style={{ fontSize: 11.5, margin: '6px 2px 0' }}>
+                  Click a button to drop a contact’s detail into whichever box you’re editing. It fills in automatically per person — see the preview →
+                </p>
+              </div>
+
+              <label className="field mt12"><span>Subject line</span>
+                <input ref={subjectRef} className="input" value={form.subject} onChange={set('subject')} onFocus={() => setFocusField('subject')} />
+              </label>
+              <label className="field mt12"><span>Message</span>
+                <textarea ref={htmlRef} className="input" style={{ minHeight: 150 }} value={form.html} onChange={set('html')} onFocus={() => setFocusField('html')} />
+              </label>
+              <label className="field mt12"><span>Plain-text fallback <small className="faint">(optional)</small></span><textarea className="input" style={{ minHeight: 80 }} value={form.text} onChange={set('text')} /></label>
             </div>
             <div className="card pad">
               <div className="row between"><h3 style={{ marginTop: 0 }}>Preview</h3><span className="muted" style={{ fontSize: 12 }}>as {sample.name}</span></div>

@@ -208,6 +208,12 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .badge.plain::before { display: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; background: var(--surface-3); color: var(--text-dim); border: 1px solid var(--border); }
 .chip .x { cursor: pointer; opacity: .7; } .chip .x:hover { opacity: 1; }
+/* Friendly "add a detail" chips — clickable, accent-tinted so they read as buttons. */
+.chip.insert { cursor: pointer; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); transition: background .12s, border-color .12s; }
+.chip.insert:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+.insert-panel { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.insert-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.insert-hint { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11.5px; font-weight: 600; }
 
 /* ── Progress bars (campaign metrics) ──────────────────────────────────── */
 .metric-cell { min-width: 96px; }
