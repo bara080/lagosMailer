@@ -67,7 +67,7 @@ export interface Stats {
   lastBlast: { sent: number; total: number; failed: number; label: string; at: string } | null;
 }
 
-export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; sheetReady: boolean; company: string; stages: Stage[]; }
+export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; }
 
 import { getCompany } from './companies';
 
@@ -98,6 +98,7 @@ export const api = {
   deleteLead: (id: number) => req<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' }),
   importCsv: (csv: string) => req<{ added: number }>('/api/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   syncSheet: () => req<{ added: number; total: number }>('/api/sheets/sync', { method: 'POST' }),
+  setSheet: (url: string, range?: string) => req<{ sheetId: string }>('/api/sheets/config', { method: 'POST', body: JSON.stringify({ url, range }) }),
   campaigns: () => req<{ campaigns: Campaign[]; counts: Counts }>('/api/campaigns'),
   campaign: (id: number) => req<Campaign>(`/api/campaigns/${id}`),
   createCampaign: (body: Partial<Campaign>) => req<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) }),

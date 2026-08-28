@@ -58,6 +58,14 @@ export function useSyncSheet() {
   });
 }
 
+export function useSetSheet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ url, range }: { url: string; range?: string }) => api.setSheet(url, range),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['config'] }); },
+  });
+}
+
 export function useCampaigns() {
   return useQuery({ queryKey: ['campaigns'], queryFn: api.campaigns });
 }

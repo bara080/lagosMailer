@@ -169,6 +169,17 @@ export async function markContacted(company, id, subject) {
   await writeAll(company, leads);
 }
 
+// Per-company settings blob (e.g. { sheetId, sheetRange }) stored in crm_store.
+export async function getSettings(company) {
+  return (await kvGet(company, 'settings', {})) || {};
+}
+export async function setSettings(company, patch) {
+  const s = (await kvGet(company, 'settings', {})) || {};
+  const next = { ...s, ...patch };
+  await kvSet(company, 'settings', next);
+  return next;
+}
+
 // Pick the first non-empty value among a set of header aliases (case-insensitive;
 // keys are already lowercased by the CSV parser / sheet reader).
 function pick(r, ...aliases) {
