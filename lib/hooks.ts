@@ -81,3 +81,11 @@ export function useBlast() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
   });
 }
+
+export function useSendSms() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.sms,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}

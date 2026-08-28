@@ -67,7 +67,7 @@ export interface Stats {
   lastBlast: { sent: number; total: number; failed: number; label: string; at: string } | null;
 }
 
-export interface Config { smtpReady: boolean; from: string; stages: Stage[]; }
+export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; company: string; stages: Stage[]; }
 
 import { getCompany } from './companies';
 
@@ -105,4 +105,6 @@ export const api = {
     req<{ sent: number; total: number; dryRun: boolean; results: any[] }>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun }) }),
   blast: (body: { ids: number[]; subject: string; html: string; text: string; dryRun: boolean }) =>
     req<{ sent: number; total: number; dryRun: boolean; results: any[] }>('/api/blast', { method: 'POST', body: JSON.stringify(body) }),
+  sms: (body: { ids: number[]; text: string; dryRun: boolean }) =>
+    req<{ sent: number; total: number; dryRun: boolean; smsReady: boolean; results: any[] }>('/api/sms', { method: 'POST', body: JSON.stringify(body) }),
 };
