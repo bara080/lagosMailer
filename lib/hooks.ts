@@ -50,6 +50,14 @@ export function useImportCsv() {
   });
 }
 
+export function useSyncSheet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.syncSheet(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}
+
 export function useCampaigns() {
   return useQuery({ queryKey: ['campaigns'], queryFn: api.campaigns });
 }

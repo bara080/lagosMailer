@@ -1,10 +1,10 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin } from 'lucide-react';
+import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StageBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useAddLead, useDeleteLead, useImportCsv, useLeads, useUpdateLead } from '@/lib/hooks';
+import { useAddLead, useConfig, useDeleteLead, useImportCsv, useLeads, useSyncSheet, useUpdateLead } from '@/lib/hooks';
 import type { Lead } from '@/lib/api';
 
 const TABS = [
@@ -23,8 +23,19 @@ export default function LeadsPage() {
   const [showImport, setShowImport] = useState(false);
 
   const { data, isLoading } = useLeads({ stage: tab, q });
+  const { data: config } = useConfig();
   const del = useDeleteLead();
   const upd = useUpdateLead();
+  const sync = useSyncSheet();
+
+  async function syncSheet() {
+    try {
+      const r = await sync.mutateAsync();
+      alert(`Synced from Google Sheet: ${r.added} new lead(s) added (${r.total} rows read).`);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
   const leads = data?.leads ?? [];
   const counts = data?.counts ?? {};
   const open = useMemo(() => leads.find((l) => l.id === openId) ?? null, [leads, openId]);
@@ -41,6 +52,11 @@ export default function LeadsPage() {
     <>
       <Topbar title="Leads" subtitle="Manage your leads and build targeted campaigns"
         actions={<>
+          {config?.sheetReady && (
+            <button className="btn ghost" onClick={syncSheet} disabled={sync.isPending}>
+              <Sheet size={15} /> {sync.isPending ? 'Syncing…' : 'Sync Google Sheet'}
+            </button>
+          )}
           <button className="btn ghost" onClick={() => setShowImport(true)}><Upload size={15} /> Import CSV</button>
           <button className="btn" onClick={() => setShowAdd(true)}><Plus size={15} /> Add Lead</button>
         </>} />
