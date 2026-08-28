@@ -1,0 +1,62 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]: lagosMailer CRM
+      - navigation [ref=e10]:
+        - link "Overview" [ref=e11] [cursor=pointer]:
+          - /url: /
+        - link "Leads" [ref=e17] [cursor=pointer]:
+          - /url: /leads
+        - link "Campaigns" [ref=e23] [cursor=pointer]:
+          - /url: /campaigns
+        - link "Compose" [ref=e27] [cursor=pointer]:
+          - /url: /compose
+        - link "Templates" [ref=e31] [cursor=pointer]:
+          - /url: /templates
+        - link "Analytics" [ref=e35] [cursor=pointer]:
+          - /url: /analytics
+        - link "Settings" [ref=e38] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]: SMTP Status
+          - generic [ref=e47]: Not configured — dry-run only
+          - link "Configure SMTP →" [ref=e48] [cursor=pointer]:
+            - /url: /settings
+        - generic [ref=e49]:
+          - generic [ref=e50]: Pro Plan
+          - generic [ref=e53]: Unlock scheduling, A/B tests & open tracking.
+          - button "Upgrade now" [ref=e54] [cursor=pointer]
+    - generic [ref=e55]:
+      - banner [ref=e78]:
+        - generic [ref=e79]:
+          - heading "Dashboard" [level=1] [ref=e80]
+          - generic [ref=e81]: Overview of your email outreach performance
+        - generic [ref=e82]:
+          - combobox [ref=e83]:
+            - option "Last 7 days" [selected]
+            - option "Last 30 days"
+          - generic [ref=e84]: "SMTP: not configured (dry run)"
+          - button "Help" [ref=e85] [cursor=pointer]
+          - button "Notifications" [ref=e89] [cursor=pointer]
+          - button "Settings" [ref=e94] [cursor=pointer]
+          - button "A Adminadmin@lagosmailer.com" [ref=e99] [cursor=pointer]:
+            - generic [ref=e100]: A
+            - generic [ref=e101]: Adminadmin@lagosmailer.com
+      - generic [ref=e177]:
+        - generic [ref=e178]:
+          - generic [ref=e180]:
+            - heading "Performance Over Time" [level=3] [ref=e181]
+            - generic [ref=e182]: Last 7 days
+          - generic [ref=e186]:
+            - heading "Top Campaigns" [level=3] [ref=e187]
+            - link "View all" [ref=e188] [cursor=pointer]:
+              - /url: /campaigns
+        - generic [ref=e192]:
+          - generic [ref=e194]:
+            - heading "Live Sending Status" [level=3] [ref=e195]
+            - generic [ref=e196]: operational
+          - heading "Recent Activity" [level=3] [ref=e203]
+          - heading "Leads by Stage" [level=3] [ref=e215]
+  - button "Open Next.js Dev Tools" [ref=e74] [cursor=pointer]
+  - alert [ref=e68]
