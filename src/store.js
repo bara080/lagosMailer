@@ -29,8 +29,16 @@ export const STAGE_TABS = [
 // ── KV primitives (crm_store) ────────────────────────────────────────────────
 const TABLE = 'crm_store';
 
+// Multi-tenant: every collection is namespaced per company. The KV row key is
+// `${company}:${collection}` (e.g. `LagosTSQ:leads`, `Native125th:leads`), so
+// each company gets its own independent row → fully isolated data.
+function nsKey(company, collection) {
+  return `${company}:${collection}`;
+}
+
 // Read a KV row's `value`, or `fallback` when the key does not exist yet.
-async function kvGet(key, fallback) {
+async function kvGet(company, collection, fallback) {
+  const key = nsKey(company, collection);
   const sb = getSupabase();
   const { data, error } = await sb.from(TABLE).select('value').eq('key', key).maybeSingle();
   if (error) throw new Error(`crm_store read failed (${key}): ${error.message}`);
@@ -39,7 +47,8 @@ async function kvGet(key, fallback) {
 }
 
 // Upsert a KV row's `value`.
-async function kvSet(key, value) {
+async function kvSet(company, collection, value) {
+  const key = nsKey(company, collection);
   const sb = getSupabase();
   const { error } = await sb
     .from(TABLE)
@@ -79,19 +88,20 @@ function normalize(r) {
   };
 }
 
-// Read all leads, seeding the 3 demo leads the first time (key absent).
-async function readAll() {
-  const existing = await kvGet('leads', null);
+// Read all leads for a company, seeding the 3 demo leads the first time (key
+// absent). Each company seeds independently on first access.
+async function readAll(company) {
+  const existing = await kvGet(company, 'leads', null);
   if (existing === null) {
     const seeded = seed();
-    await kvSet('leads', seeded);
+    await kvSet(company, 'leads', seeded);
     return seeded;
   }
   return existing;
 }
 
-async function writeAll(leads) {
-  await kvSet('leads', leads);
+async function writeAll(company, leads) {
+  await kvSet(company, 'leads', leads);
   return leads;
 }
 
@@ -101,8 +111,8 @@ function nextId(leads) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function list({ stage, q } = {}) {
-  let leads = await readAll();
+export async function list(company, { stage, q } = {}) {
+  let leads = await readAll(company);
   if (stage && stage !== 'all') {
     const tab = STAGE_TABS.find((t) => t.key === stage);
     if (tab) leads = leads.filter(tab.match);
@@ -116,52 +126,52 @@ export async function list({ stage, q } = {}) {
   return leads.sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
 }
 
-export async function counts() {
-  const leads = await readAll();
+export async function counts(company) {
+  const leads = await readAll(company);
   const out = {};
   for (const t of STAGE_TABS) out[t.key] = leads.filter(t.match).length;
   return out;
 }
 
-export async function add(input) {
-  const leads = await readAll();
+export async function add(company, input) {
+  const leads = await readAll(company);
   const lead = normalize({ ...input, id: nextId(leads), created_at: new Date().toISOString() });
   if (!lead.email && !lead.instagram) throw new Error('a lead needs an email or an instagram handle');
   leads.push(lead);
-  await writeAll(leads);
+  await writeAll(company, leads);
   return lead;
 }
 
-export async function update(id, patch) {
-  const leads = await readAll();
+export async function update(company, id, patch) {
+  const leads = await readAll(company);
   const i = leads.findIndex((l) => l.id === Number(id));
   if (i === -1) throw new Error(`lead ${id} not found`);
   leads[i] = normalize({ ...leads[i], ...patch, id: leads[i].id, created_at: leads[i].created_at });
-  await writeAll(leads);
+  await writeAll(company, leads);
   return leads[i];
 }
 
-export async function remove(id) {
-  const leads = (await readAll()).filter((l) => l.id !== Number(id));
-  await writeAll(leads);
+export async function remove(company, id) {
+  const leads = (await readAll(company)).filter((l) => l.id !== Number(id));
+  await writeAll(company, leads);
   return { ok: true };
 }
 
 // Advance a lead to `contacted` after a successful send (stage-guarded, like
 // zinga's operator_crm_mark_sent — only promotes from `new`).
-export async function markContacted(id, subject) {
-  const leads = await readAll();
+export async function markContacted(company, id, subject) {
+  const leads = await readAll(company);
   const i = leads.findIndex((l) => l.id === Number(id));
   if (i === -1) return;
   if (leads[i].stage === 'new') leads[i].stage = 'contacted';
   leads[i].contacted_at = new Date().toISOString();
   if (subject) leads[i].subject = subject;
-  await writeAll(leads);
+  await writeAll(company, leads);
 }
 
 // Import a CSV (columns: email/to_email, business/name, category, instagram, …).
-export async function importCsv(rows) {
-  const leads = await readAll();
+export async function importCsv(company, rows) {
+  const leads = await readAll(company);
   let added = 0;
   for (const r of rows) {
     const email = (r.email || r.to_email || '').trim();
@@ -186,30 +196,30 @@ export async function importCsv(rows) {
     );
     added++;
   }
-  await writeAll(leads);
+  await writeAll(company, leads);
   return { added };
 }
 
 // ── Sends + activity log (feeds the dashboard) ───────────────────────────────
 
-export async function logSend({ to, subject, status, source }) {
-  const sends = await kvGet('sends', []);
+export async function logSend(company, { to, subject, status, source }) {
+  const sends = await kvGet(company, 'sends', []);
   sends.push({ at: new Date().toISOString(), to, subject: subject || '', status, source: source || '' });
-  await kvSet('sends', sends);
+  await kvSet(company, 'sends', sends);
 }
 
-export async function logActivity({ type, text }) {
-  const acts = await kvGet('activity', []);
+export async function logActivity(company, { type, text }) {
+  const acts = await kvGet(company, 'activity', []);
   acts.unshift({ at: new Date().toISOString(), type, text });
-  await kvSet('activity', acts.slice(0, 100));
+  await kvSet(company, 'activity', acts.slice(0, 100));
 }
 
 // Aggregate everything the dashboard/home page needs, from real data.
-export async function dashboard() {
-  const leads = await readAll();
-  const sends = await kvGet('sends', []);
-  const acts = await kvGet('activity', []);
-  const c = await counts();
+export async function dashboard(company) {
+  const leads = await readAll(company);
+  const sends = await kvGet(company, 'sends', []);
+  const acts = await kvGet(company, 'activity', []);
+  const c = await counts(company);
   const sent = sends.filter((s) => s.status === 'sent');
 
   // 7-day window (oldest → today)
@@ -240,10 +250,10 @@ export async function dashboard() {
     if (l.stage === 'replied') bySource[k].replied++;
   }
   const segments = Object.values(bySource).sort((a, b) => b.recipients - a.recipients);
-  const campaigns = await listCampaigns();
+  const campaigns = await listCampaigns(company);
 
   const failed = sends.filter((s) => s.status === 'failed').length;
-  const lastBlast = await kvGet('last-blast', null);
+  const lastBlast = await kvGet(company, 'last-blast', null);
 
   return {
     metrics: {
@@ -275,14 +285,14 @@ export async function dashboard() {
   };
 }
 
-export async function setLastBlast(summary) {
-  await kvSet('last-blast', { ...summary, at: new Date().toISOString() });
+export async function setLastBlast(company, summary) {
+  await kvSet(company, 'last-blast', { ...summary, at: new Date().toISOString() });
 }
 
 // ── Campaigns ────────────────────────────────────────────────────────────────
 // Resolve which leads a campaign's audience filter targets (real data).
-export async function resolveAudience(f = {}) {
-  let leads = await readAll();
+export async function resolveAudience(company, f = {}) {
+  let leads = await readAll(company);
   if (f.ids && f.ids.length) return leads.filter((l) => f.ids.includes(l.id));
   if (f.stage && f.stage !== 'all') {
     const tab = STAGE_TABS.find((t) => t.key === f.stage);
@@ -298,16 +308,16 @@ export async function resolveAudience(f = {}) {
   return leads;
 }
 
-export async function listCampaigns() {
-  return (await kvGet('campaigns', [])).sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+export async function listCampaigns(company) {
+  return (await kvGet(company, 'campaigns', [])).sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
 }
 
-export async function getCampaign(id) {
-  return (await kvGet('campaigns', [])).find((c) => c.id === Number(id)) || null;
+export async function getCampaign(company, id) {
+  return (await kvGet(company, 'campaigns', [])).find((c) => c.id === Number(id)) || null;
 }
 
-export async function addCampaign(data) {
-  const cs = await kvGet('campaigns', []);
+export async function addCampaign(company, data) {
+  const cs = await kvGet(company, 'campaigns', []);
   const id = cs.reduce((m, c) => Math.max(m, c.id || 0), 0) + 1;
   const rec = {
     id,
@@ -330,23 +340,23 @@ export async function addCampaign(data) {
     sent_at: null,
     scheduled_at: data.scheduled_at || null,
   };
-  rec.recipients = (await resolveAudience(rec.audience)).length;
+  rec.recipients = (await resolveAudience(company, rec.audience)).length;
   cs.push(rec);
-  await kvSet('campaigns', cs);
+  await kvSet(company, 'campaigns', cs);
   return rec;
 }
 
-export async function updateCampaign(id, patch) {
-  const cs = await kvGet('campaigns', []);
+export async function updateCampaign(company, id, patch) {
+  const cs = await kvGet(company, 'campaigns', []);
   const i = cs.findIndex((c) => c.id === Number(id));
   if (i === -1) throw new Error(`campaign ${id} not found`);
   cs[i] = { ...cs[i], ...patch, id: cs[i].id, created_at: cs[i].created_at };
-  await kvSet('campaigns', cs);
+  await kvSet(company, 'campaigns', cs);
   return cs[i];
 }
 
-export async function campaignCounts() {
-  const cs = await listCampaigns();
+export async function campaignCounts(company) {
+  const cs = await listCampaigns(company);
   return {
     all: cs.length,
     sending: cs.filter((c) => c.status === 'sending').length,

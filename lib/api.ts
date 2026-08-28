@@ -69,17 +69,22 @@ export interface Stats {
 
 export interface Config { smtpReady: boolean; from: string; stages: Stage[]; }
 
+import { getCompany } from './companies';
+
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...opts,
+    headers: { 'Content-Type': 'application/json', 'x-company': getCompany(), ...(opts?.headers || {}) },
   });
   const data = await r.json();
   if (!r.ok) throw new Error((data && data.error) || `request failed: ${r.status}`);
   return data as T;
 }
 
+export interface Me { user: { _id: string; email: string; displayName: string; role: string } | null; }
+
 export const api = {
+  me: () => req<Me>('/api/auth/me'),
   config: () => req<Config>('/api/config'),
   stats: () => req<Stats>('/api/stats'),
   leads: (params: { stage?: string; q?: string } = {}) => {

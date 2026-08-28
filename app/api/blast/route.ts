@@ -6,8 +6,10 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
+    const company = req.headers.get('x-company') || 'LagosTSQ';
     const body = await req.json();
     const out = await runBlast({
+      company,
       ids: (body.ids || []).map(Number),
       subject: body.subject || '',
       html: body.html || '',

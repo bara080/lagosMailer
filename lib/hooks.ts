@@ -2,6 +2,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Campaign, type Lead } from './api';
 
+export function useMe() {
+  return useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: 300_000 });
+}
+
 export function useConfig() {
   return useQuery({ queryKey: ['config'], queryFn: api.config, staleTime: 60_000 });
 }

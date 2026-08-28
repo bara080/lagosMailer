@@ -29,6 +29,7 @@ function parseCsv(txt: string) {
 }
 
 export async function POST(req: NextRequest) {
+  const company = req.headers.get('x-company') || 'LagosTSQ';
   const body = await req.json();
-  return NextResponse.json(await store.importCsv(parseCsv(body.csv || '')));
+  return NextResponse.json(await store.importCsv(company, parseCsv(body.csv || '')));
 }
