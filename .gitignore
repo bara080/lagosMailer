@@ -11,3 +11,5 @@ data/
 # Test/browser artifacts
 .playwright-mcp/
 *.png
+.vercel
+.env*

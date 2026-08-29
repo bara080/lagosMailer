@@ -23,6 +23,12 @@ export interface Lead {
 
 export type Counts = Record<string, number>;
 
+// An uploaded asset (bytes in Vercel Blob, metadata in Supabase).
+export interface Asset { id: number; url: string; name: string; contentType: string; size: number; at: string; }
+// An asset attached to a campaign. `inline` images render in the body; others
+// are sent as file attachments.
+export interface Attachment { url: string; name: string; contentType: string; size: number; inline: boolean; }
+
 export interface Campaign {
   id: number;
   name: string;
@@ -43,6 +49,7 @@ export interface Campaign {
   created_at: string;
   sent_at: string | null;
   scheduled_at: string | null;
+  attachments?: Attachment[];
 }
 
 export interface AudienceFilter {
@@ -121,8 +128,19 @@ export const api = {
     req<SendProgress>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun, size }) }),
   controlCampaign: (id: number, action: 'pause' | 'stop' | 'resume') =>
     req<{ ok: boolean; action: string }>(`/api/campaigns/${id}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
-  testSend: (body: { subject: string; html: string; text: string }) =>
+  testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
+  listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),
+  uploadAsset: async (file: File): Promise<{ asset: Asset }> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    // No JSON Content-Type here — the browser sets the multipart boundary.
+    const r = await fetch('/api/assets', { method: 'POST', headers: { 'x-company': getCompany() }, body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `upload failed: ${r.status}`);
+    return d;
+  },
+  deleteAsset: (id: number) => req<{ ok: boolean }>(`/api/assets?id=${id}`, { method: 'DELETE' }),
   getSettings: () => req<{ settings: { signature?: Signature } }>('/api/settings'),
   setSettings: (body: { signature?: Signature | null }) =>
     req<{ ok: boolean; settings: { signature?: Signature } }>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),

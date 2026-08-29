@@ -255,6 +255,27 @@ export async function clearControl(company, id) {
   await kvSet(company, 'controls', map);
 }
 
+// ── Asset registry (email attachments / images) ──────────────────────────────
+// Metadata only — the file bytes live in Vercel Blob. This is a per-company,
+// reusable library so a flyer uploaded once can be attached to many campaigns.
+export async function listAssets(company) {
+  return await kvGet(company, 'assets', []);
+}
+export async function addAsset(company, asset) {
+  const assets = await kvGet(company, 'assets', []);
+  const id = assets.reduce((m, a) => Math.max(m, a.id || 0), 0) + 1;
+  const row = { id, at: new Date().toISOString(), ...asset };
+  assets.unshift(row);
+  await kvSet(company, 'assets', assets);
+  return row;
+}
+export async function removeAsset(company, id) {
+  const assets = await kvGet(company, 'assets', []);
+  const gone = assets.find((a) => a.id === Number(id)) || null;
+  await kvSet(company, 'assets', assets.filter((a) => a.id !== Number(id)));
+  return gone;
+}
+
 // Aggregate everything the dashboard/home page needs, from real data.
 export async function dashboard(company) {
   const leads = await readAll(company);

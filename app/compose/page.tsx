@@ -1,10 +1,10 @@
 'use client';
 import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft } from 'lucide-react';
+import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-react';
 import Topbar from '@/components/Topbar';
-import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend } from '@/lib/hooks';
-import type { Lead, SendProgress } from '@/lib/api';
+import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
+import type { Lead, SendProgress, Attachment } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
 // "[First name]" — never raw `{{name}}` and never HTML. The user types plain
@@ -106,6 +106,29 @@ function ComposeInner() {
   const test = useTestSend();
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
+  // Attachments (uploaded to Blob, registered in Supabase).
+  const upload = useUploadAsset();
+  const { data: assetData } = useAssets();
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const blobReady = assetData?.blobReady ?? true;
+
+  async function onFiles(files: FileList | null) {
+    if (!files) return;
+    setUploadErr(null);
+    for (const file of Array.from(files)) {
+      try {
+        const { asset } = await upload.mutateAsync(file);
+        setAttachments((a) => [...a, {
+          url: asset.url, name: asset.name, contentType: asset.contentType, size: asset.size,
+          inline: asset.contentType.startsWith('image/'), // images show inline by default
+        }]);
+      } catch (e: any) { setUploadErr(e.message); }
+    }
+  }
+  const removeAttachment = (url: string) => setAttachments((a) => a.filter((x) => x.url !== url));
+  const toggleInline = (url: string) => setAttachments((a) => a.map((x) => x.url === url ? { ...x, inline: !x.inline } : x));
+
   async function sendTest() {
     setTestMsg('Sending test…');
     try {
@@ -113,6 +136,7 @@ function ComposeInner() {
         subject: toBackend(form.subject),
         html: plainToHtml(toBackend(form.message)),
         text: toBackend(form.message),
+        attachments,
       });
       setTestMsg(`✓ Test sent to ${out.to} — check your inbox.`);
     } catch (e: any) {
@@ -140,6 +164,7 @@ function ComposeInner() {
       html: plainToHtml(toBackend(form.message)),
       text: toBackend(form.message),
       fromName: form.fromName, replyTo: form.replyTo, audience, status: 'draft',
+      attachments,
     } as any);
     const out = await send.mutateAsync({ id: camp.id, dryRun, onProgress: (p) => setProgress(p) });
     setProgress(null);
@@ -236,12 +261,50 @@ function ComposeInner() {
                 <textarea ref={messageRef} className="input" style={{ minHeight: 190 }} value={form.message} onChange={set('message')} onFocus={() => setFocusField('message')} placeholder="Write your email here. Press Enter for a new line." />
               </label>
               <p className="faint" style={{ fontSize: 11.5, marginTop: -2 }}>Just type normally — no code needed. A blank line starts a new paragraph.</p>
+
+              {/* Attachments */}
+              <div className="mt16">
+                <div className="row between">
+                  <span style={{ color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>Attachments</span>
+                  <label className="btn ghost sm" style={{ cursor: blobReady ? 'pointer' : 'not-allowed', opacity: blobReady ? 1 : 0.5 }}>
+                    <Paperclip size={14} /> Add file
+                    <input type="file" multiple hidden disabled={!blobReady || upload.isPending} onChange={(e) => { onFiles(e.target.files); e.target.value = ''; }} />
+                  </label>
+                </div>
+                {!blobReady && <p className="faint mt8" style={{ fontSize: 12 }}>File storage isn’t enabled yet — add <code>BLOB_READ_WRITE_TOKEN</code> (Vercel Blob) to upload flyers/images.</p>}
+                {upload.isPending && <p className="faint mt8" style={{ fontSize: 12 }}>Uploading…</p>}
+                {uploadErr && <p className="mt8" style={{ fontSize: 12, color: 'var(--red)' }}>{uploadErr}</p>}
+                {attachments.length > 0 && (
+                  <div className="stack gap6 mt8">
+                    {attachments.map((a) => (
+                      <div key={a.url} className="row between" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px' }}>
+                        <span className="row gap8" style={{ fontSize: 13, minWidth: 0 }}>
+                          {a.contentType.startsWith('image/') ? <ImageIcon size={14} /> : <FileText size={14} />}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                          <span className="faint">{(a.size / 1024).toFixed(0)} KB</span>
+                        </span>
+                        <span className="row gap8">
+                          {a.contentType.startsWith('image/') && (
+                            <label className="row gap6 faint" style={{ fontSize: 11.5, cursor: 'pointer' }}>
+                              <input type="checkbox" checked={a.inline} onChange={() => toggleInline(a.url)} /> show in email
+                            </label>
+                          )}
+                          <button className="icon-btn sm" title="Remove" onClick={() => removeAttachment(a.url)}><X size={13} /></button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="card pad">
               <div className="row between"><h3 style={{ marginTop: 0 }}>Preview</h3><span className="muted" style={{ fontSize: 12 }}>as {sampleLabel}</span></div>
               <div className="card mt12" style={{ background: '#fff', color: '#111', padding: 18, borderRadius: 8 }}>
                 <div style={{ fontWeight: 700, marginBottom: 10 }}>{fill(form.subject, sample)}</div>
                 <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{fill(form.message, sample)}</div>
+                {attachments.filter((a) => a.inline && a.contentType.startsWith('image/')).map((a) => (
+                  <img key={a.url} src={a.url} alt={a.name} style={{ maxWidth: '100%', height: 'auto', display: 'block', margin: '14px 0', borderRadius: 6 }} />
+                ))}
                 {config?.signature?.enabled && (
                   <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid #e5e7eb', color: '#6b7280', fontSize: 12 }}>
                     {config.signature.businessName || 'Your signature'} · added automatically —{' '}

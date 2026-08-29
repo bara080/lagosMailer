@@ -6,7 +6,7 @@ import Sidebar from './Sidebar';
 // Renders the app shell (sidebar + content) for authenticated pages only.
 // Bare routes like /login must NOT show the nav shell — rendering it there
 // leaks the app surface to unauthenticated visitors.
-const BARE_ROUTES = ['/login'];
+const BARE_ROUTES = ['/login', '/optin', '/privacy'];
 
 export default function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();

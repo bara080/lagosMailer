@@ -113,6 +113,25 @@ export function useTestSend() {
   return useMutation({ mutationFn: api.testSend });
 }
 
+// Per-company asset library (Blob-backed).
+export function useAssets() {
+  return useQuery({ queryKey: ['assets'], queryFn: api.listAssets });
+}
+export function useUploadAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.uploadAsset(file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+export function useDeleteAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteAsset(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+
 export function useSetSettings() {
   const qc = useQueryClient();
   return useMutation({

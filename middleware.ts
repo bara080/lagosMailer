@@ -11,9 +11,13 @@ import { SESSION_COOKIE, verifyToken } from '@/lib/auth/token';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always-allow paths.
+  // Always-allow paths. The opt-in form + privacy policy are PUBLIC by design
+  // (subscribers and carriers must reach them without logging in).
   if (
     pathname === '/login' ||
+    pathname === '/optin' ||
+    pathname === '/privacy' ||
+    pathname === '/api/optin' ||
     pathname.startsWith('/api/auth/')
   ) {
     return NextResponse.next();

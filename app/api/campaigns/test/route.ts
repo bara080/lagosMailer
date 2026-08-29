@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
     const out = await runTestSend({
       company, to: session.email,
       subject: body.subject || '', html: body.html || '', text: body.text || '',
+      attachments: body.attachments || [],
     });
     return NextResponse.json(out);
   } catch (e: any) {
