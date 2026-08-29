@@ -37,7 +37,13 @@ export class Emailer {
    * @returns {Promise<Emailer>}
    */
   static async open(cfg) {
-    const ehloName = cfg.ehloName || (cfg.from.split('@')[1] ?? 'localhost');
+    // Derive the EHLO hostname from the SENDER'S DOMAIN. `from` may be a
+    // "Name <addr>" string, so pull the bare address first, then its domain, and
+    // validate it's a clean hostname — otherwise a malformed From breaks the
+    // SMTP handshake (501 HELO/EHLO invalid).
+    const bare = (String(cfg.from || '').match(/<([^>]+)>/)?.[1] ?? cfg.from ?? '').trim();
+    const domain = bare.split('@')[1];
+    const ehloName = cfg.ehloName || (domain && /^[a-z0-9.-]+$/i.test(domain) ? domain : 'localhost');
     const client = await SmtpClient.connect({
       host: cfg.host,
       port: cfg.port,
