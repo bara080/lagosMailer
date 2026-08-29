@@ -418,6 +418,7 @@ export async function addCampaign(company, data) {
     fromName: data.fromName || '',
     replyTo: data.replyTo || '',
     audience: data.audience || {},
+    attachments: Array.isArray(data.attachments) ? data.attachments : [], // flyers/images
     status: data.status || 'draft', // draft | sending | completed | paused | scheduled
     recipients: 0,
     sent: 0,
