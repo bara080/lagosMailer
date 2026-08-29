@@ -6,7 +6,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const hasBlob = () => !!process.env.BLOB_READ_WRITE_TOKEN;
+// Blob is usable with either the classic read-write token OR the newer
+// OIDC-based auth (VERCEL_OIDC_TOKEN + BLOB_STORE_ID), which is what a connected
+// "Private" store provides. The @vercel/blob SDK resolves whichever is present.
+const hasBlob = () => !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
 // List this company's uploaded assets (reusable library).
 export async function GET(req: NextRequest) {
