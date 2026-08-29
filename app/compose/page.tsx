@@ -192,6 +192,17 @@ function ComposeInner() {
     : ids.length ? { ids, limit: cap > 0 ? cap : undefined } : { stage, limit: cap > 0 ? cap : undefined };
 
   async function finalize(dryRun: boolean) {
+    // Hard confirmation on every REAL send — prevents accidental full-audience
+    // blasts. The count is shown so a 584 send can't be mistaken for a test.
+    if (!dryRun) {
+      const who = mode === 'custom' ? `${recipientCount} custom address(es)` : `${recipientCount} recipient(s)`;
+      const ok = window.confirm(`Send "${form.name}" to ${who}?\n\nThis sends real emails and cannot be undone.`);
+      if (!ok) return;
+      if (recipientCount >= 50) {
+        const typed = window.prompt(`This is a large send (${recipientCount}). Type the number ${recipientCount} to confirm:`);
+        if (String(typed).trim() !== String(recipientCount)) { setResult({ dryRun: false, sent: 0, total: recipientCount, results: [], name: form.name, cancelled: true }); return; }
+      }
+    }
     setResult(null);
     setProgress(dryRun ? null : { done: false, dryRun: false, sent: 0, sentNow: 0, total: recipientCount, remaining: recipientCount, smtpReady: true, results: [] });
     const camp = await create.mutateAsync({

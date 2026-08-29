@@ -16,8 +16,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (action === 'pause') {
       await store.setControl(co, cid, 'pause');
+      // Reflect immediately so the UI updates even if no send loop is running;
+      // a loop that IS running also halts on the flag.
+      await store.updateCampaign(co, cid, { status: 'paused' });
     } else if (action === 'stop') {
       await store.setControl(co, cid, 'stop');
+      await store.updateCampaign(co, cid, { status: 'stopped', queue: null });
     } else if (action === 'resume') {
       await store.clearControl(co, cid);
     } else {

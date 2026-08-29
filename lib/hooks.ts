@@ -67,7 +67,17 @@ export function useSetSheet() {
 }
 
 export function useCampaigns() {
-  return useQuery({ queryKey: ['campaigns'], queryFn: api.campaigns });
+  return useQuery({
+    queryKey: ['campaigns'],
+    queryFn: api.campaigns,
+    staleTime: 0,
+    // Live-poll while anything is in flight so SENDING/paused rows never go
+    // stale (e.g. a campaign that completes or is stopped elsewhere).
+    refetchInterval: (query) => {
+      const active = query.state.data?.campaigns?.some((c) => c.status === 'sending' || c.status === 'paused');
+      return active ? 3000 : false;
+    },
+  });
 }
 
 export function useCreateCampaign() {
