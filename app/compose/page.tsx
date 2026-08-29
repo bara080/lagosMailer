@@ -111,7 +111,21 @@ function ComposeInner() {
   const { data: assetData } = useAssets();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState('');
   const blobReady = assetData?.blobReady ?? true;
+
+  // Include an image/file by pasting its public URL — works without Blob (e.g.
+  // a flyer already hosted somewhere). Images default to showing inline.
+  function addByUrl() {
+    const url = urlInput.trim();
+    if (!/^https?:\/\//i.test(url)) { setUploadErr('Enter a full URL starting with http(s)://'); return; }
+    setUploadErr(null);
+    const name = (url.split('/').pop() || 'image').split('?')[0];
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+    setAttachments((a) => [...a, { url, name, contentType: isImg ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream', size: 0, inline: isImg }]);
+    setUrlInput('');
+  }
 
   async function onFiles(files: FileList | null) {
     if (!files) return;
@@ -271,7 +285,13 @@ function ComposeInner() {
                     <input type="file" multiple hidden disabled={!blobReady || upload.isPending} onChange={(e) => { onFiles(e.target.files); e.target.value = ''; }} />
                   </label>
                 </div>
-                {!blobReady && <p className="faint mt8" style={{ fontSize: 12 }}>File storage isn’t enabled yet — add <code>BLOB_READ_WRITE_TOKEN</code> (Vercel Blob) to upload flyers/images.</p>}
+                {!blobReady && <p className="faint mt8" style={{ fontSize: 12 }}>Uploads need Vercel Blob (<code>BLOB_READ_WRITE_TOKEN</code>). Until then, paste an image URL below to include it.</p>}
+                <div className="row gap8 mt8">
+                  <input className="input" style={{ fontSize: 13 }} value={urlInput} onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addByUrl(); } }}
+                    placeholder="…or paste an image URL (e.g. your flyer link)" />
+                  <button className="btn ghost sm" onClick={addByUrl}>Add URL</button>
+                </div>
                 {upload.isPending && <p className="faint mt8" style={{ fontSize: 12 }}>Uploading…</p>}
                 {uploadErr && <p className="mt8" style={{ fontSize: 12, color: 'var(--red)' }}>{uploadErr}</p>}
                 {attachments.length > 0 && (
@@ -361,6 +381,7 @@ function ComposeInner() {
               <div className="kv"><span className="k">Campaign</span><span>{form.name}</span></div>
               <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{fill(form.subject, sample)}</span></div>
               <div className="kv"><span className="k">Track Opens</span><span className="faint">soon</span></div>
+              <div className="kv"><span className="k">Attachments</span><span>{attachments.length ? `${attachments.length} file(s)` : <span className="faint">none — add in Content step</span>}</span></div>
               <button className="btn ghost mt16" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}><FlaskConical size={15} /> Send a test to myself</button>
               {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
               <button className="btn ghost mt8" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>

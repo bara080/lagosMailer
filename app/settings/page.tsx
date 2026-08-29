@@ -80,7 +80,7 @@ function SignatureEditor({ company }: { company: string }) {
           <div style={{ background: '#fff', color: '#374151', padding: 18, borderRadius: 8, fontFamily: 'Arial, sans-serif', fontSize: 13, lineHeight: 1.55, opacity: sig.enabled ? 1 : 0.4 }}>
             <div style={{ color: '#9ca3af' }}>…your email body…</div>
             <div style={{ marginTop: 22, paddingTop: 14, borderTop: '1px solid #e5e7eb' }}>
-              {sig.logoUrl ? <img src={sig.logoUrl} alt="" style={{ maxHeight: 52, marginBottom: 10, display: 'block' }} /> : null}
+              {sig.logoUrl ? <div style={{ display: 'inline-block', background: '#1a1220', padding: '10px 16px', borderRadius: 10, marginBottom: 12 }}><img src={sig.logoUrl} alt="" style={{ maxHeight: 46, display: 'block' }} /></div> : null}
               {sig.businessName ? <div style={{ fontWeight: 700, color: '#111827', fontSize: 14 }}>{sig.businessName}</div> : null}
               {sig.tagline ? <div>{sig.tagline}</div> : null}
               {sig.address ? <div>{sig.address}</div> : null}

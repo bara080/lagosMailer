@@ -215,6 +215,17 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .insert-panel { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
 .insert-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .insert-hint { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11.5px; font-weight: 600; }
+/* Assets grid */
+.assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.asset-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+.asset-thumb { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+.asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.asset-file { color: var(--text-dim); }
+.asset-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px 4px; }
+.asset-name { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-actions { display: flex; gap: 6px; padding: 6px 11px 11px; }
+.asset-actions .btn { flex: 1; justify-content: center; }
+.asset-actions .btn.danger { flex: 0 0 auto; color: var(--red); }
 
 /* ── Progress bars (campaign metrics) ──────────────────────────────────── */
 .metric-cell { min-width: 96px; }
