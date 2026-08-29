@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye } from 'lucide-react';
+import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useCampaigns, useSendCampaign } from '@/lib/hooks';
+import { useCampaigns, useSendCampaign, useControlCampaign } from '@/lib/hooks';
 import type { Campaign } from '@/lib/api';
 
 const TABS = ['all', 'sending', 'scheduled', 'completed', 'paused', 'draft'];
@@ -24,6 +24,8 @@ export default function CampaignsPage() {
   const [tab, setTab] = useState('all');
   const { data, isLoading } = useCampaigns();
   const send = useSendCampaign();
+  const control = useControlCampaign();
+  const [menu, setMenu] = useState<number | null>(null);
   const counts = data?.counts ?? {};
   const campaigns = (data?.campaigns ?? []).filter((c) => tab === 'all' || c.status === tab);
 
@@ -82,7 +84,29 @@ export default function CampaignsPage() {
                       <td>
                         <div className="row gap6">
                           <button className="btn ghost sm" title="Preview (dry run)" onClick={() => send.mutate({ id: c.id, dryRun: true })}><Eye size={14} /></button>
-                          <button className="btn sm" title="Send" onClick={() => { if (confirm(`Send "${c.name}" to ${c.recipients} recipient(s)?`)) send.mutate({ id: c.id, dryRun: false }); }}><Play size={14} /></button>
+                          {c.status === 'sending' ? (
+                            <button className="btn ghost sm" title="Pause" onClick={() => control.mutate({ id: c.id, action: 'pause' })}><Pause size={14} /></button>
+                          ) : c.status === 'paused' ? (
+                            <button className="btn sm" title="Resume" onClick={() => control.mutate({ id: c.id, action: 'resume' })}><Play size={14} /></button>
+                          ) : (
+                            <button className="btn sm" title="Send" onClick={() => { if (confirm(`Send "${c.name}" to ${c.recipients} recipient(s)?`)) send.mutate({ id: c.id, dryRun: false }); }}><Play size={14} /></button>
+                          )}
+                          <div className="usermenu">
+                            <button className="btn ghost sm" title="More" onClick={() => setMenu(menu === c.id ? null : c.id)}><MoreVertical size={14} /></button>
+                            {menu === c.id && (
+                              <>
+                                <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setMenu(null)} />
+                                <div className="menu-pop" style={{ right: 0, left: 'auto' }}>
+                                  {c.status === 'sending' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'pause' }); setMenu(null); }}><Pause size={15} /> Pause</button>}
+                                  {c.status === 'paused' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'resume' }); setMenu(null); }}><Play size={15} /> Resume</button>}
+                                  {(c.status === 'sending' || c.status === 'paused') && (
+                                    <button className="mi danger" onClick={() => { if (confirm(`Stop "${c.name}"? Unsent recipients will be skipped.`)) control.mutate({ id: c.id, action: 'stop' }); setMenu(null); }}><StopCircle size={15} /> Stop</button>
+                                  )}
+                                  {c.status !== 'sending' && c.status !== 'paused' && <div className="menu-label">No actions for {c.status}</div>}
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>

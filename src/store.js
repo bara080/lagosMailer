@@ -236,6 +236,25 @@ export async function logActivity(company, { type, text }) {
   await kvSet(company, 'activity', acts.slice(0, 100));
 }
 
+// ── Campaign send control (pause / stop) ─────────────────────────────────────
+// A tiny per-company map { [campaignId]: 'pause' | 'stop' } kept in its OWN KV
+// row. The batch sender only READS this (never writes it), so a pause/stop flag
+// set from the UI can't be clobbered by an in-flight batch — it always wins.
+export async function getControl(company, id) {
+  const map = await kvGet(company, 'controls', {});
+  return map[String(id)] || null;
+}
+export async function setControl(company, id, action) {
+  const map = await kvGet(company, 'controls', {});
+  map[String(id)] = action;
+  await kvSet(company, 'controls', map);
+}
+export async function clearControl(company, id) {
+  const map = await kvGet(company, 'controls', {});
+  delete map[String(id)];
+  await kvSet(company, 'controls', map);
+}
+
 // Aggregate everything the dashboard/home page needs, from real data.
 export async function dashboard(company) {
   const leads = await readAll(company);

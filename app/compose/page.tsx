@@ -3,7 +3,7 @@ import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft } from 'lucide-react';
 import Topbar from '@/components/Topbar';
-import { useCreateCampaign, useLeads, useSendCampaign } from '@/lib/hooks';
+import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend } from '@/lib/hooks';
 import type { Lead, SendProgress } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
@@ -100,8 +100,25 @@ function ComposeInner() {
     });
   }
 
+  const { data: config } = useConfig();
   const create = useCreateCampaign();
   const send = useSendCampaign();
+  const test = useTestSend();
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  async function sendTest() {
+    setTestMsg('Sending test…');
+    try {
+      const out = await test.mutateAsync({
+        subject: toBackend(form.subject),
+        html: plainToHtml(toBackend(form.message)),
+        text: toBackend(form.message),
+      });
+      setTestMsg(`✓ Test sent to ${out.to} — check your inbox.`);
+    } catch (e: any) {
+      setTestMsg(`✗ ${e.message}`);
+    }
+  }
 
   const { data: leadData } = useLeads({ stage: ids.length ? 'all' : stage });
   const recipients = useMemo(() => {
@@ -225,8 +242,18 @@ function ComposeInner() {
               <div className="card mt12" style={{ background: '#fff', color: '#111', padding: 18, borderRadius: 8 }}>
                 <div style={{ fontWeight: 700, marginBottom: 10 }}>{fill(form.subject, sample)}</div>
                 <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{fill(form.message, sample)}</div>
+                {config?.signature?.enabled && (
+                  <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid #e5e7eb', color: '#6b7280', fontSize: 12 }}>
+                    {config.signature.businessName || 'Your signature'} · added automatically —{' '}
+                    <span style={{ color: '#9ca3af' }}>edit in Settings</span>
+                  </div>
+                )}
               </div>
               <p className="faint mt12" style={{ fontSize: 12 }}>This is the real email {sampleLabel} will receive. Everyone else gets their own details filled in.</p>
+              <button className="btn ghost mt12" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}>
+                <FlaskConical size={15} /> Send a test to myself
+              </button>
+              {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
             </div>
           </div>
         )}
@@ -271,7 +298,9 @@ function ComposeInner() {
               <div className="kv"><span className="k">Campaign</span><span>{form.name}</span></div>
               <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{fill(form.subject, sample)}</span></div>
               <div className="kv"><span className="k">Track Opens</span><span className="faint">soon</span></div>
-              <button className="btn ghost mt16" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
+              <button className="btn ghost mt16" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}><FlaskConical size={15} /> Send a test to myself</button>
+              {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
+              <button className="btn ghost mt8" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
               <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={() => finalize(false)}><Zap size={15} /> Send now</button>
             </div>
           </div>

@@ -91,6 +91,36 @@ export function useSendCampaign() {
   });
 }
 
+// Pause / stop / resume a campaign. Resume also drains the remaining queue.
+export function useControlCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, action, onProgress }: { id: number; action: 'pause' | 'stop' | 'resume'; onProgress?: (p: SendProgress) => void }) => {
+      await api.controlCampaign(id, action);
+      if (action === 'resume') return sendCampaignAll(id, { dryRun: false, onProgress });
+      return null;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+}
+
+// Send one test email to the operator's own inbox (no lead, no audience).
+export function useTestSend() {
+  return useMutation({ mutationFn: api.testSend });
+}
+
+export function useSetSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.setSettings,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+}
+
 export function useBlast() {
   const qc = useQueryClient();
   return useMutation({

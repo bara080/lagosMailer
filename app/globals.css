@@ -204,7 +204,8 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .badge.completed { color: var(--green); background: var(--green-soft); }
 .badge.draft { color: var(--text-dim); background: var(--surface-3); }
 .badge.scheduled { color: var(--amber); background: var(--amber-soft); }
-.badge.paused { color: var(--red); background: var(--red-soft); }
+.badge.paused { color: var(--amber); background: var(--amber-soft); }
+.badge.stopped { color: var(--red); background: var(--red-soft); }
 .badge.plain::before { display: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; background: var(--surface-3); color: var(--text-dim); border: 1px solid var(--border); }
 .chip .x { cursor: pointer; opacity: .7; } .chip .x:hover { opacity: 1; }

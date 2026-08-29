@@ -67,7 +67,19 @@ export interface Stats {
   lastBlast: { sent: number; total: number; failed: number; label: string; at: string } | null;
 }
 
-export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; }
+// Rich per-company email signature, auto-appended to every send.
+export interface Signature {
+  enabled: boolean;
+  businessName: string;
+  tagline: string;
+  address: string;
+  phone: string;
+  website: string;
+  logoUrl: string;
+  socials: { instagram?: string; tiktok?: string; facebook?: string; x?: string };
+}
+
+export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; }
 
 import { getCompany } from './companies';
 
@@ -107,6 +119,13 @@ export const api = {
   // campaign (it loops this until `done`).
   sendCampaignBatch: (id: number, dryRun: boolean, size?: number) =>
     req<SendProgress>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun, size }) }),
+  controlCampaign: (id: number, action: 'pause' | 'stop' | 'resume') =>
+    req<{ ok: boolean; action: string }>(`/api/campaigns/${id}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
+  testSend: (body: { subject: string; html: string; text: string }) =>
+    req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
+  getSettings: () => req<{ settings: { signature?: Signature } }>('/api/settings'),
+  setSettings: (body: { signature?: Signature | null }) =>
+    req<{ ok: boolean; settings: { signature?: Signature } }>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),
   blast: (body: { ids: number[]; subject: string; html: string; text: string; dryRun: boolean }) =>
     req<{ sent: number; total: number; dryRun: boolean; results: any[] }>('/api/blast', { method: 'POST', body: JSON.stringify(body) }),
   sms: (body: { ids: number[]; text: string; dryRun: boolean }) =>
