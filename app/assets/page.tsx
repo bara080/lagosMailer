@@ -2,12 +2,13 @@
 import { useRef, useState } from 'react';
 import { Upload, Trash2, Copy, Check, Image as ImageIcon, FileText, FolderOpen } from 'lucide-react';
 import Topbar from '@/components/Topbar';
-import { useAssets, useUploadAsset, useDeleteAsset } from '@/lib/hooks';
+import { useAssets, useUploadAsset, useDeleteAsset, useRegisterAssetUrl } from '@/lib/hooks';
 import { EmptyState } from '@/components/ui';
 
 export default function AssetsPage() {
   const { data, isLoading } = useAssets();
   const upload = useUploadAsset();
+  const register = useRegisterAssetUrl();
   const del = useDeleteAsset();
   const assets = data?.assets ?? [];
   const blobReady = data?.blobReady ?? false;
@@ -16,6 +17,14 @@ export default function AssetsPage() {
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState('');
+
+  async function addUrl() {
+    const url = urlInput.trim();
+    if (!/^https?:\/\//i.test(url)) { setErr('Enter a full URL starting with http(s)://'); return; }
+    setErr(null);
+    try { await register.mutateAsync({ url }); setUrlInput(''); } catch (e: any) { setErr(e.message); }
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -65,6 +74,14 @@ export default function AssetsPage() {
           <FolderOpen size={26} style={{ color: 'var(--text-dim)' }} />
           <div style={{ marginTop: 8, fontWeight: 600 }}>Drop files here or click to upload</div>
           <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>Images (JPG, PNG, WebP) show inline in emails; other files attach as downloads.</div>
+        </div>
+
+        {/* Add by URL — register an already-hosted file (no upload, no Blob) */}
+        <div className="row gap8 mt12">
+          <input className="input" style={{ fontSize: 13 }} value={urlInput} onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addUrl(); } }}
+            placeholder="…or paste a hosted image/file URL to add it (e.g. your flyer or logo link)" />
+          <button className="btn ghost" disabled={register.isPending} onClick={addUrl}>Add URL</button>
         </div>
 
         {err && <p className="mt12" style={{ color: 'var(--red)', fontSize: 13 }}>{err}</p>}

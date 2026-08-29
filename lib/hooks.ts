@@ -124,6 +124,13 @@ export function useUploadAsset() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
   });
 }
+export function useRegisterAssetUrl() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { url: string; name?: string }) => api.registerAssetUrl(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
 export function useDeleteAsset() {
   const qc = useQueryClient();
   return useMutation({

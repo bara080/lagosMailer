@@ -153,8 +153,14 @@ export const api = {
   testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
   listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),
+  // Register an already-hosted file as an asset (no upload). Works without Blob.
+  registerAssetUrl: (body: { url: string; name?: string }) =>
+    req<{ asset: Asset }>('/api/assets', { method: 'POST', body: JSON.stringify(body) }),
   uploadAsset: async (file: File): Promise<{ asset: Asset }> => {
     const prepared = await compressImageFile(file); // shrink images to fit the upload limit + suit email
+    if (prepared.size > 4.4 * 1024 * 1024) {
+      throw new Error(`"${file.name}" is ${(prepared.size / 1024 / 1024).toFixed(1)} MB — too large to upload. Use a JPG/PNG under ~4 MB (TIFF/HEIC can’t be compressed in the browser), or paste its URL instead.`);
+    }
     const fd = new FormData();
     fd.append('file', prepared);
     // No JSON Content-Type here — the browser sets the multipart boundary.
