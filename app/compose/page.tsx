@@ -158,20 +158,42 @@ function ComposeInner() {
     }
   }
 
+  const [mode, setMode] = useState<'audience' | 'custom'>('audience');
+  const [customEmails, setCustomEmails] = useState('');
+  const [limit, setLimit] = useState('');
+
   const { data: leadData } = useLeads({ stage: ids.length ? 'all' : stage });
-  const recipients = useMemo(() => {
+  const customList = useMemo(
+    () => customEmails.split(/[\s,;]+/).map((s) => s.trim()).filter((e) => /^\S+@\S+\.\S+$/.test(e)),
+    [customEmails],
+  );
+  const cap = parseInt(limit, 10);
+
+  // Leads matching the current audience filter (used for the sample preview).
+  const audienceLeads = useMemo(() => {
     const all = leadData?.leads ?? [];
     const base = ids.length ? all.filter((l) => ids.includes(l.id)) : all;
     return base.filter((l) => l.email && l.stage !== 'unsub');
   }, [leadData, ids, stage]);
-  const sample = recipients[0] ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' };
-  const sampleLabel = sample.name || sample.business || 'a contact';
 
-  const audience = ids.length ? { ids } : { stage };
+  // How many will actually receive it (mode + cap aware).
+  const recipientCount = useMemo(() => {
+    const n = mode === 'custom' ? customList.length : audienceLeads.length;
+    return cap > 0 ? Math.min(n, cap) : n;
+  }, [mode, customList, audienceLeads, cap]);
+
+  const sample = mode === 'custom'
+    ? { name: '', business: '', category: '', email: customList[0] || 'you@example.com' }
+    : audienceLeads[0] ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' };
+  const sampleLabel = sample.name || sample.business || (mode === 'custom' ? (customList[0] || 'a contact') : 'a contact');
+
+  const audience = mode === 'custom'
+    ? { emails: customList, limit: cap > 0 ? cap : undefined }
+    : ids.length ? { ids, limit: cap > 0 ? cap : undefined } : { stage, limit: cap > 0 ? cap : undefined };
 
   async function finalize(dryRun: boolean) {
     setResult(null);
-    setProgress(dryRun ? null : { done: false, dryRun: false, sent: 0, sentNow: 0, total: recipients.length, remaining: recipients.length, smtpReady: true, results: [] });
+    setProgress(dryRun ? null : { done: false, dryRun: false, sent: 0, sentNow: 0, total: recipientCount, remaining: recipientCount, smtpReady: true, results: [] });
     const camp = await create.mutateAsync({
       name: form.name,
       subject: toBackend(form.subject),
@@ -219,17 +241,41 @@ function ComposeInner() {
             <div className="card pad">
               <h3 style={{ marginTop: 0 }}>Audience</h3>
               <div className="row gap12" style={{ alignItems: 'baseline' }}>
-                <div style={{ fontSize: 34, fontWeight: 750 }}>{recipients.length.toLocaleString()}</div>
-                <div className="muted">leads will receive this campaign</div>
+                <div style={{ fontSize: 34, fontWeight: 750 }}>{recipientCount.toLocaleString()}</div>
+                <div className="muted">{mode === 'custom' ? 'address(es) will receive this' : 'people will receive this campaign'}</div>
               </div>
-              {ids.length ? <p className="muted mt12">Targeting <b>{ids.length}</b> hand-picked lead(s) from the Leads page.</p> : (
+
+              {!ids.length && (
+                <div className="pill-tabs mt12">
+                  <span className={`chip ${mode === 'audience' ? 'insert' : ''}`} style={{ cursor: 'pointer' }} onClick={() => setMode('audience')}>My leads</span>
+                  <span className={`chip ${mode === 'custom' ? 'insert' : ''}`} style={{ cursor: 'pointer' }} onClick={() => setMode('custom')}>Custom emails (test)</span>
+                </div>
+              )}
+
+              {ids.length ? (
+                <p className="muted mt12">Targeting <b>{ids.length}</b> hand-picked lead(s) from the Leads page.</p>
+              ) : mode === 'custom' ? (
+                <>
+                  <label className="field mt16"><span>Send only to these emails</span>
+                    <textarea className="input" style={{ minHeight: 90 }} value={customEmails} onChange={(e) => setCustomEmails(e.target.value)}
+                      placeholder={'you@example.com, colleague@example.com\n(one per line or comma-separated)'} />
+                  </label>
+                  <p className="faint mt8" style={{ fontSize: 12 }}>Great for a real test — sends to exactly these addresses, not your 584 leads. {customList.length > 0 && <b>{customList.length} valid</b>}</p>
+                </>
+              ) : (
                 <>
                   <label className="field mt16"><span>Filter by stage</span>
                     <select className="input" value={stage} onChange={(e) => setStage(e.target.value)}>
                       {STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </label>
-                  <p className="faint mt12" style={{ fontSize: 12 }}>Unsubscribed leads and leads without an email are excluded automatically.</p>
+                  <label className="field mt12"><span>Send to at most <small className="faint">(optional cap — e.g. 20)</small></span>
+                    <input className="input" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="all" />
+                  </label>
+                  <p className="faint mt12" style={{ fontSize: 12 }}>
+                    {cap > 0 ? <>Only the first <b>{Math.min(audienceLeads.length, cap)}</b> of {audienceLeads.length.toLocaleString()} will be emailed. </> : null}
+                    Unsubscribed leads and leads without an email are excluded automatically.
+                  </p>
                 </>
               )}
             </div>
@@ -326,9 +372,19 @@ function ComposeInner() {
                   <img key={a.url} src={a.url} alt={a.name} style={{ maxWidth: '100%', height: 'auto', display: 'block', margin: '14px 0', borderRadius: 6 }} />
                 ))}
                 {config?.signature?.enabled && (
-                  <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid #e5e7eb', color: '#6b7280', fontSize: 12 }}>
-                    {config.signature.businessName || 'Your signature'} · added automatically —{' '}
-                    <span style={{ color: '#9ca3af' }}>edit in Settings</span>
+                  <div style={{ marginTop: 22, paddingTop: 14, borderTop: '1px solid #e5e7eb', color: '#374151', fontSize: 13, lineHeight: 1.55 }}>
+                    {config.signature.logoUrl && <div style={{ display: 'inline-block', background: '#1a1220', padding: '10px 16px', borderRadius: 10, marginBottom: 12 }}><img src={config.signature.logoUrl} alt="" style={{ maxHeight: 46, display: 'block' }} /></div>}
+                    {config.signature.businessName && <div style={{ fontWeight: 700, color: '#111827', fontSize: 14 }}>{config.signature.businessName}</div>}
+                    {config.signature.tagline && <div>{config.signature.tagline}</div>}
+                    {config.signature.address && <div>{config.signature.address}</div>}
+                    {(config.signature.phone || config.signature.website) && <div>{[config.signature.phone, config.signature.website].filter(Boolean).join(' · ')}</div>}
+                    <div style={{ marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                      {(['instagram', 'tiktok', 'facebook', 'x'] as const).map((k) => config.signature!.socials?.[k]
+                        ? <span key={k} style={{ color: '#6b7280', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <img src={`/social-${k}.png`} width={16} height={16} alt="" style={{ display: 'block' }} />
+                            {k === 'tiktok' ? 'TikTok' : k === 'x' ? 'X' : k[0].toUpperCase() + k.slice(1)}
+                          </span> : null)}
+                    </div>
                   </div>
                 )}
               </div>
@@ -377,7 +433,7 @@ function ComposeInner() {
             </div>
             <div className="card pad detail">
               <h3 style={{ marginTop: 0 }}>Campaign Summary</h3>
-              <div className="kv"><span className="k">Recipients</span><b>{recipients.length.toLocaleString()}</b></div>
+              <div className="kv"><span className="k">Recipients</span><b>{recipientCount.toLocaleString()}</b></div>
               <div className="kv"><span className="k">Campaign</span><span>{form.name}</span></div>
               <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{fill(form.subject, sample)}</span></div>
               <div className="kv"><span className="k">Track Opens</span><span className="faint">soon</span></div>

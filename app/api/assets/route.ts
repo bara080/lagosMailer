@@ -32,9 +32,10 @@ export async function POST(req: NextRequest) {
       const ext = (name.split('.').pop() || '').toLowerCase();
       const isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
       const asset = await store.addAsset(company, {
-        url, name, contentType: body.contentType || (isImg ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream'), size: body.size || 0, backend: 'external',
+        url, name, contentType: body.contentType || (isImg ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream'),
+        size: body.size || 0, backend: body.backend || 'external', path: body.path,
       });
-      await store.logActivity(company, { type: 'asset', text: `Linked asset "${name}"` });
+      await store.logActivity(company, { type: 'asset', text: body.backend === 'supabase' ? `Uploaded asset "${name}"` : `Linked asset "${name}"` });
       return NextResponse.json({ asset });
     }
 

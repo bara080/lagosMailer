@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ShieldCheck, ShieldAlert, Database, KeyRound, PenLine, Save, Instagram, Facebook } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Database, KeyRound, PenLine, Save } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfig, useSetSettings } from '@/lib/hooks';
 import type { Signature } from '@/lib/api';
@@ -87,8 +87,8 @@ function SignatureEditor({ company }: { company: string }) {
               {(sig.phone || sig.website) && <div>{[sig.phone, sig.website].filter(Boolean).join(' · ')}</div>}
               <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 {(['instagram', 'tiktok', 'facebook', 'x'] as const).map((k) => sig.socials[k] ? (
-                  <a key={k} href={socialUrl(k, sig.socials[k])} style={{ color: '#6b7280', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    {k === 'instagram' ? <Instagram size={14} /> : k === 'facebook' ? <Facebook size={14} /> : null}
+                  <a key={k} href={socialUrl(k, sig.socials[k])} style={{ color: '#6b7280', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <img src={`/social-${k}.png`} width={16} height={16} alt="" style={{ display: 'block' }} />
                     {k === 'tiktok' ? 'TikTok' : k === 'x' ? 'X' : k[0].toUpperCase() + k.slice(1)}
                   </a>
                 ) : null)}

@@ -352,22 +352,49 @@ export async function setLastBlast(company, summary) {
 }
 
 // ── Campaigns ────────────────────────────────────────────────────────────────
-// Resolve which leads a campaign's audience filter targets (real data).
+// Resolve which recipients a campaign's audience targets. Returns lead-like
+// target objects. Supports:
+//   - emails: [..]  → send to exactly these addresses (custom test list). Matched
+//                     to existing leads when possible, else synthetic targets.
+//   - ids / stage / category / source / q → filter the lead list
+//   - limit: N      → cap the audience to the first N (safe batch)
 export async function resolveAudience(company, f = {}) {
-  let leads = await readAll(company);
-  if (f.ids && f.ids.length) return leads.filter((l) => f.ids.includes(l.id));
-  if (f.stage && f.stage !== 'all') {
-    const tab = STAGE_TABS.find((t) => t.key === f.stage);
-    leads = tab ? leads.filter(tab.match) : leads.filter((l) => l.stage === f.stage);
+  const cap = (arr) => (f.limit > 0 ? arr.slice(0, f.limit) : arr);
+  const all = await readAll(company);
+
+  // Custom explicit email list.
+  if (Array.isArray(f.emails) && f.emails.length) {
+    const byEmail = new Map(all.map((l) => [String(l.email || '').toLowerCase(), l]));
+    const seen = new Set();
+    const targets = [];
+    for (const raw of f.emails) {
+      const email = String(raw).trim();
+      if (!/^\S+@\S+\.\S+$/.test(email)) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(byEmail.get(key) || { id: null, email, name: '', business: '', category: '', source: 'custom', stage: 'new' });
+    }
+    return cap(targets);
   }
-  if (f.category) leads = leads.filter((l) => (l.category || '').toLowerCase() === f.category.toLowerCase());
-  if (f.source) leads = leads.filter((l) => l.source === f.source);
-  if (f.q) {
-    const s = f.q.toLowerCase();
-    leads = leads.filter((l) => [l.business, l.name, l.email].some((v) => (v || '').toLowerCase().includes(s)));
+
+  let leads = all;
+  if (f.ids && f.ids.length) {
+    leads = leads.filter((l) => f.ids.includes(l.id));
+  } else {
+    if (f.stage && f.stage !== 'all') {
+      const tab = STAGE_TABS.find((t) => t.key === f.stage);
+      leads = tab ? leads.filter(tab.match) : leads.filter((l) => l.stage === f.stage);
+    }
+    if (f.category) leads = leads.filter((l) => (l.category || '').toLowerCase() === f.category.toLowerCase());
+    if (f.source) leads = leads.filter((l) => l.source === f.source);
+    if (f.q) {
+      const s = f.q.toLowerCase();
+      leads = leads.filter((l) => [l.business, l.name, l.email].some((v) => (v || '').toLowerCase().includes(s)));
+    }
   }
   if (f.emailOnly !== false) leads = leads.filter((l) => l.email && l.stage !== 'unsub');
-  return leads;
+  return cap(leads);
 }
 
 export async function listCampaigns(company) {

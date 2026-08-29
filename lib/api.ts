@@ -58,6 +58,8 @@ export interface AudienceFilter {
   source?: string;
   q?: string;
   ids?: number[];
+  emails?: string[]; // custom explicit recipient list (for testing)
+  limit?: number;    // cap the audience to the first N (safe batch)
 }
 
 export interface Stats {
@@ -156,22 +158,25 @@ export const api = {
   // Register an already-hosted file as an asset (no upload). Works without Blob.
   registerAssetUrl: (body: { url: string; name?: string }) =>
     req<{ asset: Asset }>('/api/assets', { method: 'POST', body: JSON.stringify(body) }),
+  // Uploads DIRECTLY to Supabase Storage via a signed URL (bypasses the ~4.5MB
+  // serverless limit). Images are still compressed for email-friendliness.
   uploadAsset: async (file: File): Promise<{ asset: Asset }> => {
-    const prepared = await compressImageFile(file); // shrink images to fit the upload limit + suit email
-    if (prepared.size > 4.4 * 1024 * 1024) {
-      throw new Error(`"${file.name}" is ${(prepared.size / 1024 / 1024).toFixed(1)} MB — too large to upload. Use a JPG/PNG under ~4 MB (TIFF/HEIC can’t be compressed in the browser), or paste its URL instead.`);
+    const prepared = await compressImageFile(file);
+    if (prepared.size > 48 * 1024 * 1024) {
+      throw new Error(`"${file.name}" is ${(prepared.size / 1024 / 1024).toFixed(1)} MB — over the 50 MB limit.`);
     }
-    const fd = new FormData();
-    fd.append('file', prepared);
-    // No JSON Content-Type here — the browser sets the multipart boundary.
-    const r = await fetch('/api/assets', { method: 'POST', headers: { 'x-company': getCompany() }, body: fd });
-    let d: any = null;
-    try { d = await r.json(); } catch { /* platform error page (e.g. 413) — not JSON */ }
-    if (!r.ok) {
-      if (r.status === 413) throw new Error('File is too large. Images are auto-compressed; for other files keep them under ~4 MB.');
-      throw new Error(d?.error || `Upload failed (${r.status})`);
-    }
-    return d;
+    // 1) get a signed upload URL from the server
+    const sign = await req<{ signedUrl: string; path: string; url: string }>('/api/assets/sign', {
+      method: 'POST', body: JSON.stringify({ filename: prepared.name, contentType: prepared.type }),
+    });
+    // 2) upload the file straight to storage
+    const put = await fetch(sign.signedUrl, { method: 'PUT', body: prepared, headers: { 'content-type': prepared.type || 'application/octet-stream' } });
+    if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+    // 3) register the finished asset
+    return req<{ asset: Asset }>('/api/assets', {
+      method: 'POST',
+      body: JSON.stringify({ url: sign.url, name: prepared.name, contentType: prepared.type || 'application/octet-stream', size: prepared.size, path: sign.path, backend: 'supabase' }),
+    });
   },
   deleteAsset: (id: number) => req<{ ok: boolean }>(`/api/assets?id=${id}`, { method: 'DELETE' }),
   getSettings: () => req<{ settings: { signature?: Signature } }>('/api/settings'),
