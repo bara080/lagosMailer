@@ -90,6 +90,28 @@ export interface Config { smtpReady: boolean; from: string; smsReady: boolean; s
 
 import { getCompany } from './companies';
 
+// Downscale/re-encode large images in the browser BEFORE upload so they fit the
+// serverless request-body limit (~4.5 MB) and are email-friendly. Non-images and
+// formats the browser can't decode (e.g. TIFF) pass through untouched.
+async function compressImageFile(file: File, maxDim = 1600, quality = 0.82): Promise<File> {
+  if (typeof document === 'undefined') return file;
+  if (!/^image\/(jpe?g|png|webp)$/i.test(file.type)) return file;
+  if (file.size < 900 * 1024) return file; // already small enough
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', quality));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' });
+  } catch { return file; }
+}
+
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, {
     ...opts,
@@ -132,12 +154,17 @@ export const api = {
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
   listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),
   uploadAsset: async (file: File): Promise<{ asset: Asset }> => {
+    const prepared = await compressImageFile(file); // shrink images to fit the upload limit + suit email
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', prepared);
     // No JSON Content-Type here — the browser sets the multipart boundary.
     const r = await fetch('/api/assets', { method: 'POST', headers: { 'x-company': getCompany() }, body: fd });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d?.error || `upload failed: ${r.status}`);
+    let d: any = null;
+    try { d = await r.json(); } catch { /* platform error page (e.g. 413) — not JSON */ }
+    if (!r.ok) {
+      if (r.status === 413) throw new Error('File is too large. Images are auto-compressed; for other files keep them under ~4 MB.');
+      throw new Error(d?.error || `Upload failed (${r.status})`);
+    }
     return d;
   },
   deleteAsset: (id: number) => req<{ ok: boolean }>(`/api/assets?id=${id}`, { method: 'DELETE' }),
