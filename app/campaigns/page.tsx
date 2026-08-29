@@ -5,6 +5,7 @@ import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search,
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
 import { useCampaigns, useSendCampaign, useControlCampaign } from '@/lib/hooks';
+import { useConfirm } from '@/components/ConfirmProvider';
 import type { Campaign } from '@/lib/api';
 
 const TABS = ['all', 'sending', 'scheduled', 'completed', 'paused', 'draft'];
@@ -25,6 +26,7 @@ export default function CampaignsPage() {
   const { data, isLoading } = useCampaigns();
   const send = useSendCampaign();
   const control = useControlCampaign();
+  const confirm = useConfirm();
   const [menu, setMenu] = useState<number | null>(null);
   const counts = data?.counts ?? {};
   const campaigns = (data?.campaigns ?? []).filter((c) => tab === 'all' || c.status === tab);
@@ -89,7 +91,7 @@ export default function CampaignsPage() {
                           ) : c.status === 'paused' ? (
                             <button className="btn sm" title="Resume" onClick={() => control.mutate({ id: c.id, action: 'resume' })}><Play size={14} /></button>
                           ) : (
-                            <button className="btn sm" title="Send" onClick={() => { if (confirm(`Send "${c.name}" to ${c.recipients} recipient(s)?`)) send.mutate({ id: c.id, dryRun: false }); }}><Play size={14} /></button>
+                            <button className="btn sm" title="Send" onClick={async () => { if (await confirm({ title: 'Send this campaign?', message: <>Send <b>“{c.name}”</b> to <b>{c.recipients.toLocaleString()}</b> recipient(s). This sends real emails and can’t be undone.</>, confirmLabel: `Send to ${c.recipients}`, danger: c.recipients >= 50, requireText: c.recipients >= 50 ? String(c.recipients) : undefined })) send.mutate({ id: c.id, dryRun: false }); }}><Play size={14} /></button>
                           )}
                           <div className="usermenu">
                             <button className="btn ghost sm" title="More" onClick={() => setMenu(menu === c.id ? null : c.id)}><MoreVertical size={14} /></button>
@@ -100,7 +102,7 @@ export default function CampaignsPage() {
                                   {c.status === 'sending' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'pause' }); setMenu(null); }}><Pause size={15} /> Pause</button>}
                                   {c.status === 'paused' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'resume' }); setMenu(null); }}><Play size={15} /> Resume</button>}
                                   {(c.status === 'sending' || c.status === 'paused') && (
-                                    <button className="mi danger" onClick={() => { if (confirm(`Stop "${c.name}"? Unsent recipients will be skipped.`)) control.mutate({ id: c.id, action: 'stop' }); setMenu(null); }}><StopCircle size={15} /> Stop</button>
+                                    <button className="mi danger" onClick={async () => { setMenu(null); if (await confirm({ title: 'Stop this campaign?', message: <>Stop <b>“{c.name}”</b>? Unsent recipients will be skipped.</>, confirmLabel: 'Stop', danger: true })) control.mutate({ id: c.id, action: 'stop' }); }}><StopCircle size={15} /> Stop</button>
                                   )}
                                   {c.status !== 'sending' && c.status !== 'paused' && <div className="menu-label">No actions for {c.status}</div>}
                                 </div>

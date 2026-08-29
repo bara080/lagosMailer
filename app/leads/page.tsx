@@ -5,6 +5,7 @@ import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone
 import Topbar from '@/components/Topbar';
 import { StageBadge, TableSkeleton, EmptyState } from '@/components/ui';
 import { useAddLead, useConfig, useDeleteLead, useImportCsv, useLeads, useSyncSheet, useUpdateLead } from '@/lib/hooks';
+import { useConfirm } from '@/components/ConfirmProvider';
 import type { Lead } from '@/lib/api';
 
 const TABS = [
@@ -27,6 +28,7 @@ export default function LeadsPage() {
   const del = useDeleteLead();
   const upd = useUpdateLead();
   const sync = useSyncSheet();
+  const confirm = useConfirm();
 
   async function syncSheet() {
     try {
@@ -78,7 +80,7 @@ export default function LeadsPage() {
               <span className="muted">{selected.size} selected</span>
               <button className="btn ghost sm" onClick={contactSelected}><Send size={14} /> Contact</button>
               <button className="btn danger sm" onClick={async () => {
-                if (!confirm(`Delete ${selected.size} lead(s)?`)) return;
+                if (!(await confirm({ title: 'Delete leads?', message: <>Delete <b>{selected.size}</b> lead(s)? This can’t be undone.</>, confirmLabel: 'Delete', danger: true }))) return;
                 for (const id of selected) await del.mutateAsync(id);
                 setSelected(new Set());
               }}><Trash2 size={14} /> Delete</button>

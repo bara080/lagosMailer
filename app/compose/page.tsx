@@ -3,7 +3,7 @@ import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-react';
 import Topbar from '@/components/Topbar';
-import ConfirmModal from '@/components/ConfirmModal';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
 import type { Lead, Attachment } from '@/lib/api';
 
@@ -191,7 +191,17 @@ function ComposeInner() {
     ? { emails: customList, limit: cap > 0 ? cap : undefined }
     : ids.length ? { ids, limit: cap > 0 ? cap : undefined } : { stage, limit: cap > 0 ? cap : undefined };
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const confirm = useConfirm();
+  async function askAndSend() {
+    const ok = await confirm({
+      title: 'Send this campaign?',
+      message: <>Send <b>“{form.name}”</b> to <b>{recipientCount.toLocaleString()}</b> {mode === 'custom' ? 'custom address(es)' : 'recipient(s)'}. This sends real emails and can’t be undone.</>,
+      confirmLabel: `Send to ${recipientCount.toLocaleString()}`,
+      danger: recipientCount >= 50,
+      requireText: recipientCount >= 50 ? String(recipientCount) : undefined,
+    });
+    if (ok) finalize(false);
+  }
 
   async function finalize(dryRun: boolean) {
     setResult(null);
@@ -219,7 +229,7 @@ function ComposeInner() {
           <button className="btn ghost" onClick={() => router.push('/campaigns')}>Save Draft</button>
           {step > 1 && <button className="btn ghost" onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>}
           {step < 3 ? <button className="btn" onClick={() => setStep(step + 1)}>Next →</button>
-            : <button className="btn" disabled={send.isPending || create.isPending} onClick={() => setConfirmOpen(true)}><Send size={15} /> Send campaign</button>}
+            : <button className="btn" disabled={send.isPending || create.isPending} onClick={askAndSend}><Send size={15} /> Send campaign</button>}
         </>} />
       <div className="page">
         {/* Steps */}
@@ -447,22 +457,12 @@ function ComposeInner() {
               <button className="btn ghost mt16" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}><FlaskConical size={15} /> Send a test to myself</button>
               {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
               <button className="btn ghost mt8" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
-              <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={() => setConfirmOpen(true)}><Zap size={15} /> Send now</button>
+              <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={askAndSend}><Zap size={15} /> Send now</button>
             </div>
           </div>
         )}
       </div>
 
-      <ConfirmModal
-        open={confirmOpen}
-        title="Send this campaign?"
-        danger={recipientCount >= 50}
-        confirmLabel={`Send to ${recipientCount.toLocaleString()}`}
-        requireText={recipientCount >= 50 ? String(recipientCount) : undefined}
-        message={<>Send <b>“{form.name}”</b> to <b>{recipientCount.toLocaleString()}</b> {mode === 'custom' ? 'custom address(es)' : 'recipient(s)'}. This sends real emails and can’t be undone.</>}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => { setConfirmOpen(false); finalize(false); }}
-      />
     </>
   );
 }

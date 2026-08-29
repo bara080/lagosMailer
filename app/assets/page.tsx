@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { Upload, Trash2, Copy, Check, Image as ImageIcon, FileText, FolderOpen } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useAssets, useUploadAsset, useDeleteAsset, useRegisterAssetUrl } from '@/lib/hooks';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { EmptyState } from '@/components/ui';
 
 export default function AssetsPage() {
@@ -10,6 +11,7 @@ export default function AssetsPage() {
   const upload = useUploadAsset();
   const register = useRegisterAssetUrl();
   const del = useDeleteAsset();
+  const confirm = useConfirm();
   const assets = data?.assets ?? [];
   const blobReady = data?.blobReady ?? false;
 
@@ -110,7 +112,7 @@ export default function AssetsPage() {
                         {copied === a.url ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy link</>}
                       </button>
                       <button className="btn ghost sm danger" disabled={del.isPending}
-                        onClick={() => { if (confirm(`Delete "${a.name}"? This can’t be undone.`)) del.mutate(a.id); }} title="Delete">
+                        onClick={async () => { if (await confirm({ title: 'Delete asset?', message: <>Delete <b>“{a.name}”</b>? This can’t be undone.</>, confirmLabel: 'Delete', danger: true })) del.mutate(a.id); }} title="Delete">
                         <Trash2 size={13} />
                       </button>
                     </div>
