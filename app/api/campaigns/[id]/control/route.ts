@@ -24,6 +24,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await store.updateCampaign(co, cid, { status: 'stopped', queue: null });
     } else if (action === 'resume') {
       await store.clearControl(co, cid);
+      // Flip back to sending so the background cron drains the remaining queue.
+      await store.updateCampaign(co, cid, { status: 'sending' });
     } else {
       return NextResponse.json({ error: 'unknown action' }, { status: 400 });
     }

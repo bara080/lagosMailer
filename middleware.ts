@@ -18,6 +18,7 @@ export async function middleware(request: NextRequest) {
     pathname === '/optin' ||
     pathname === '/privacy' ||
     pathname === '/api/optin' ||
+    pathname.startsWith('/api/cron/') ||
     pathname.startsWith('/api/auth/')
   ) {
     return NextResponse.next();

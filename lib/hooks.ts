@@ -1,6 +1,6 @@
 'use client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, sendCampaignAll, type Campaign, type Lead, type SendProgress } from './api';
+import { api, type Campaign, type Lead, type SendProgress } from './api';
 
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: 300_000 });
@@ -91,8 +91,10 @@ export function useCreateCampaign() {
 export function useSendCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, dryRun, onProgress }: { id: number; dryRun: boolean; onProgress?: (p: SendProgress) => void }) =>
-      sendCampaignAll(id, { dryRun, onProgress }),
+    // Kicks ONE batch (starts the send / does the dry-run). Real sends then
+    // continue in the background via the cron — no browser loop, so closing the
+    // tab can't stall a campaign.
+    mutationFn: ({ id, dryRun }: { id: number; dryRun: boolean }) => api.sendCampaignBatch(id, dryRun),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       qc.invalidateQueries({ queryKey: ['leads'] });
@@ -105,9 +107,10 @@ export function useSendCampaign() {
 export function useControlCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, action, onProgress }: { id: number; action: 'pause' | 'stop' | 'resume'; onProgress?: (p: SendProgress) => void }) => {
+    // Pause/stop/resume just set/clear the control flag. Resume flips it back to
+    // sending; the cron then drains the remaining queue in the background.
+    mutationFn: async ({ id, action }: { id: number; action: 'pause' | 'stop' | 'resume' }) => {
       await api.controlCampaign(id, action);
-      if (action === 'resume') return sendCampaignAll(id, { dryRun: false, onProgress });
       return null;
     },
     onSuccess: () => {

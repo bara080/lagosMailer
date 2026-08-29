@@ -3,8 +3,9 @@ import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-react';
 import Topbar from '@/components/Topbar';
+import ConfirmModal from '@/components/ConfirmModal';
 import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
-import type { Lead, SendProgress, Attachment } from '@/lib/api';
+import type { Lead, Attachment } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
 // "[First name]" — never raw `{{name}}` and never HTML. The user types plain
@@ -77,7 +78,6 @@ function ComposeInner() {
   });
   const set = (k: string) => (e: any) => setForm({ ...form, [k]: e.target.value });
   const [result, setResult] = useState<any>(null);
-  const [progress, setProgress] = useState<SendProgress | null>(null);
 
   // Refs to the editable fields, so "Add a detail" inserts at the caret of the
   // field the user is actually editing.
@@ -191,20 +191,10 @@ function ComposeInner() {
     ? { emails: customList, limit: cap > 0 ? cap : undefined }
     : ids.length ? { ids, limit: cap > 0 ? cap : undefined } : { stage, limit: cap > 0 ? cap : undefined };
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   async function finalize(dryRun: boolean) {
-    // Hard confirmation on every REAL send — prevents accidental full-audience
-    // blasts. The count is shown so a 584 send can't be mistaken for a test.
-    if (!dryRun) {
-      const who = mode === 'custom' ? `${recipientCount} custom address(es)` : `${recipientCount} recipient(s)`;
-      const ok = window.confirm(`Send "${form.name}" to ${who}?\n\nThis sends real emails and cannot be undone.`);
-      if (!ok) return;
-      if (recipientCount >= 50) {
-        const typed = window.prompt(`This is a large send (${recipientCount}). Type the number ${recipientCount} to confirm:`);
-        if (String(typed).trim() !== String(recipientCount)) { setResult({ dryRun: false, sent: 0, total: recipientCount, results: [], name: form.name, cancelled: true }); return; }
-      }
-    }
     setResult(null);
-    setProgress(dryRun ? null : { done: false, dryRun: false, sent: 0, sentNow: 0, total: recipientCount, remaining: recipientCount, smtpReady: true, results: [] });
     const camp = await create.mutateAsync({
       name: form.name,
       subject: toBackend(form.subject),
@@ -213,11 +203,14 @@ function ComposeInner() {
       fromName: form.fromName, replyTo: form.replyTo, audience, status: 'draft',
       attachments,
     } as any);
-    const out = await send.mutateAsync({ id: camp.id, dryRun, onProgress: (p) => setProgress(p) });
-    setProgress(null);
-    setResult({ ...out, name: form.name });
+    // Kick the first batch; real sends then finish in the background via the cron.
+    const out: any = await send.mutateAsync({ id: camp.id, dryRun });
+    if (dryRun) {
+      setResult({ ...out, name: form.name });
+    } else {
+      setResult({ started: true, name: form.name, total: out.total ?? recipientCount, sentNow: out.sentNow ?? 0, done: out.done });
+    }
   }
-  const sending = send.isPending && progress && !progress.dryRun;
 
   return (
     <>
@@ -226,7 +219,7 @@ function ComposeInner() {
           <button className="btn ghost" onClick={() => router.push('/campaigns')}>Save Draft</button>
           {step > 1 && <button className="btn ghost" onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>}
           {step < 3 ? <button className="btn" onClick={() => setStep(step + 1)}>Next →</button>
-            : <button className="btn" disabled={send.isPending || create.isPending} onClick={() => finalize(false)}><Send size={15} /> Send campaign</button>}
+            : <button className="btn" disabled={send.isPending || create.isPending} onClick={() => setConfirmOpen(true)}><Send size={15} /> Send campaign</button>}
         </>} />
       <div className="page">
         {/* Steps */}
@@ -420,24 +413,26 @@ function ComposeInner() {
                   <div className="card pad" style={{ opacity: .5 }}><div className="row gap8"><FlaskConical size={16} /> <b>A/B Test</b></div><small className="muted">Pro feature</small></div>
                 </div>
               </div>
-              {sending && progress && (
-                <div className="card pad">
-                  <h3 style={{ marginTop: 0 }}>Sending…</h3>
-                  <div className="row between" style={{ fontSize: 13 }}>
-                    <span className="muted">{progress.sent.toLocaleString()} of {progress.total.toLocaleString()} sent</span>
-                    <b>{progress.total ? Math.round((progress.sent / progress.total) * 100) : 0}%</b>
-                  </div>
-                  <div className="bar blue mt8"><span style={{ width: `${progress.total ? (progress.sent / progress.total) * 100 : 0}%` }} /></div>
-                  <p className="faint mt8" style={{ fontSize: 12 }}>Keep this tab open until it finishes — large lists send in batches.</p>
-                </div>
-              )}
               {result && (
                 <div className="card pad">
-                  <h3 style={{ marginTop: 0 }}>Result</h3>
-                  <p>{result.dryRun ? `DRY RUN — ${result.total} recipient(s), nothing sent.` : `Sent ${result.sent}/${result.total}.`}</p>
-                  <div className="stack gap6" style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                    {result.results.slice(0, 12).map((r: any, i: number) => <div key={i} className="faint">{r.status.padEnd(9)} {r.email}{r.error ? ' — ' + r.error : ''}</div>)}
-                  </div>
+                  <h3 style={{ marginTop: 0 }}>{result.dryRun ? 'Preview (dry run)' : result.started ? 'Sending started' : 'Result'}</h3>
+                  {result.dryRun ? (
+                    <>
+                      <p>DRY RUN — {result.total} recipient(s), nothing sent.</p>
+                      <div className="stack gap6" style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                        {(result.results || []).slice(0, 12).map((r: any, i: number) => <div key={i} className="faint">{r.status.padEnd(9)} {r.email}{r.error ? ' — ' + r.error : ''}</div>)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ color: 'var(--green)' }}>✓ Sending to <b>{result.total?.toLocaleString?.() ?? result.total}</b> recipient(s).</p>
+                      <p className="muted" style={{ fontSize: 13 }}>
+                        {result.done
+                          ? 'All sent.'
+                          : `${result.sentNow ?? 0} sent so far — the rest continues in the background. You can safely close this tab; track live progress on the Campaigns page.`}
+                      </p>
+                    </>
+                  )}
                   <button className="btn ghost mt12" onClick={() => router.push('/campaigns')}>Go to Campaigns →</button>
                 </div>
               )}
@@ -452,11 +447,22 @@ function ComposeInner() {
               <button className="btn ghost mt16" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}><FlaskConical size={15} /> Send a test to myself</button>
               {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
               <button className="btn ghost mt8" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
-              <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={() => finalize(false)}><Zap size={15} /> Send now</button>
+              <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={() => setConfirmOpen(true)}><Zap size={15} /> Send now</button>
             </div>
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title="Send this campaign?"
+        danger={recipientCount >= 50}
+        confirmLabel={`Send to ${recipientCount.toLocaleString()}`}
+        requireText={recipientCount >= 50 ? String(recipientCount) : undefined}
+        message={<>Send <b>“{form.name}”</b> to <b>{recipientCount.toLocaleString()}</b> {mode === 'custom' ? 'custom address(es)' : 'recipient(s)'}. This sends real emails and can’t be undone.</>}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => { setConfirmOpen(false); finalize(false); }}
+      />
     </>
   );
 }
