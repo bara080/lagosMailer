@@ -13,3 +13,7 @@ data/
 *.png
 .vercel
 .env*
+
+# Local scratch notes
+todo.md
+brain.md

@@ -51,10 +51,12 @@ export default function OptInPage() {
                 style={{ padding: '11px 12px', borderRadius: 9, border: '1px solid #3a2c47', background: '#1a1220', color: '#fff', fontSize: 15 }} />
             </label>
 
+            {/* Optional (unchecked by default). Carriers reject "forced opt-in":
+                the consent checkbox must NOT be required when the phone field is. */}
             <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5, color: '#b6acc2', lineHeight: 1.5, marginTop: 4 }}>
-              <input type="checkbox" checked={form.consent} onChange={set('consent')} required style={{ marginTop: 3 }} />
+              <input type="checkbox" checked={form.consent} onChange={set('consent')} style={{ marginTop: 3 }} />
               <span>
-                By checking this box and submitting my number, I agree to receive recurring marketing text messages
+                <b style={{ color: '#d9b26a' }}>Optional:</b> By checking this box, I agree to receive recurring marketing text messages
                 from Native Harlem at the number provided. Consent is not a condition of any purchase.
                 Message frequency may vary. Message &amp; data rates may apply. Reply HELP for help and STOP to opt out.
                 See our{' '}
