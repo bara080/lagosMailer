@@ -449,7 +449,7 @@ function ComposeInner() {
               <div className="row between"><h3 style={{ marginTop: 0 }}>Preview</h3><span className="muted" style={{ fontSize: 12 }}>as {sampleLabel}</span></div>
               <div className="card mt12" style={{ background: '#fff', color: '#111', padding: 18, borderRadius: 8 }}>
                 <div style={{ fontWeight: 700, marginBottom: 10 }}>{fill(form.subject, sample)}</div>
-                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{fill(form.message, sample)}</div>
+                <div style={{ lineHeight: 1.5, wordBreak: 'break-word' }} dangerouslySetInnerHTML={{ __html: plainToHtml(fill(form.message, sample)) }} />
                 {attachments.filter((a) => a.inline && a.contentType.startsWith('image/')).map((a) => (
                   <img key={a.url} src={a.url} alt={a.name} style={{ maxWidth: '100%', height: 'auto', display: 'block', margin: '14px 0', borderRadius: 6 }} />
                 ))}
