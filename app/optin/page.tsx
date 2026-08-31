@@ -77,6 +77,7 @@ export default function OptInPage() {
         <p style={{ color: '#7d7390', fontSize: 11, marginTop: 18, lineHeight: 1.5 }}>
           Native Harlem · 2319 Frederick Douglass Blvd, New York, NY 10027 · 212 913 0226.
           We never share your mobile opt-in data with third parties.
+          Text messages are sent by Click Build Technologies LLC on behalf of Native Harlem.
         </p>
       </div>
     </div>
