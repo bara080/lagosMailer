@@ -44,8 +44,15 @@ const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
 // Turn a plain-text message (blank line = new paragraph, single newline = line
 // break) into safe HTML. User text is escaped; the `{{…}}` tokens pass through.
+// Links: `[label](url)` → a named link (clean anchor text); a bare http(s) URL
+// also becomes clickable. Guarded so we never double-wrap.
+const LINK = 'color:#2563eb;text-decoration:underline';
 function plainToHtml(text: string) {
-  const body = escapeHtml((text || '').trim());
+  let body = escapeHtml((text || '').trim())
+    // named links: [Reserve on OpenTable](https://…)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" style="${LINK}">$1</a>`);
+  // bare URLs not already inside a tag (not preceded by " ' or >)
+  body = body.replace(/(^|[^"'>])(https?:\/\/[^\s<]+[^\s<.,;:)\]}"'])/g, `$1<a href="$2" style="${LINK}">$2</a>`);
   return body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('\n');
 }
 
