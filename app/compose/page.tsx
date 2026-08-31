@@ -169,6 +169,10 @@ function ComposeInner() {
   const [mode, setMode] = useState<'audience' | 'custom'>('audience');
   const [customEmails, setCustomEmails] = useState('');
   const [limit, setLimit] = useState('');
+  const [fromAddress, setFromAddress] = useState(''); // chosen "send from" (empty = company default)
+  const [skipEmailed, setSkipEmailed] = useState(true); // rolling batches: don't re-email leads
+  const senders = config?.senders ?? [];
+  const effectiveFrom = fromAddress || config?.from || '';
 
   const { data: leadData } = useLeads({ stage: ids.length ? 'all' : stage });
   const customList = useMemo(
@@ -178,11 +182,17 @@ function ComposeInner() {
   const cap = parseInt(limit, 10);
 
   // Leads matching the current audience filter (used for the sample preview).
-  const audienceLeads = useMemo(() => {
+  const allEmailable = useMemo(() => {
     const all = leadData?.leads ?? [];
     const base = ids.length ? all.filter((l) => ids.includes(l.id)) : all;
     return base.filter((l) => l.email && l.stage !== 'unsub');
   }, [leadData, ids, stage]);
+  // Rolling batches: exclude leads already emailed (have contacted_at).
+  const audienceLeads = useMemo(
+    () => (skipEmailed ? allEmailable.filter((l) => !l.contacted_at) : allEmailable),
+    [allEmailable, skipEmailed],
+  );
+  const alreadyEmailed = allEmailable.length - audienceLeads.length;
 
   // How many will actually receive it (mode + cap aware).
   const recipientCount = useMemo(() => {
@@ -197,7 +207,9 @@ function ComposeInner() {
 
   const audience = mode === 'custom'
     ? { emails: customList, limit: cap > 0 ? cap : undefined }
-    : ids.length ? { ids, limit: cap > 0 ? cap : undefined } : { stage, limit: cap > 0 ? cap : undefined };
+    : ids.length
+      ? { ids, limit: cap > 0 ? cap : undefined, skipEmailed }
+      : { stage, limit: cap > 0 ? cap : undefined, skipEmailed };
 
   const confirm = useConfirm();
   async function askAndSend() {
@@ -218,7 +230,7 @@ function ComposeInner() {
       subject: toBackend(form.subject),
       html: plainToHtml(toBackend(form.message)),
       text: toBackend(form.message),
-      fromName: form.fromName, replyTo: form.replyTo, audience, status: 'draft',
+      fromName: form.fromName, fromAddress: effectiveFrom, replyTo: form.replyTo, audience, status: 'draft',
       attachments,
     } as any);
     // Kick the first batch; real sends then finish in the background via the cron.
@@ -291,11 +303,16 @@ function ComposeInner() {
                       {STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </label>
-                  <label className="field mt12"><span>Send to at most <small className="faint">(optional cap — e.g. 20)</small></span>
+                  <label className="field mt12"><span>Send to at most <small className="faint">(optional cap — e.g. 200)</small></span>
                     <input className="input" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="all" />
                   </label>
+                  <label className="row gap8 mt12" style={{ fontSize: 13, cursor: 'pointer', alignItems: 'flex-start' }}>
+                    <input type="checkbox" checked={skipEmailed} onChange={(e) => setSkipEmailed(e.target.checked)} style={{ marginTop: 2 }} />
+                    <span>Skip leads I’ve already emailed <b className="faint">(rolling batches — no repeats)</b></span>
+                  </label>
                   <p className="faint mt12" style={{ fontSize: 12 }}>
-                    {cap > 0 ? <>Only the first <b>{Math.min(audienceLeads.length, cap)}</b> of {audienceLeads.length.toLocaleString()} will be emailed. </> : null}
+                    {skipEmailed && alreadyEmailed > 0 ? <><b>{alreadyEmailed.toLocaleString()}</b> already emailed (excluded). <b>{audienceLeads.length.toLocaleString()}</b> not yet emailed.<br /></> : null}
+                    {cap > 0 ? <>This send: the next <b>{Math.min(audienceLeads.length, cap)}</b> of {audienceLeads.length.toLocaleString()} remaining. Run it again to continue. </> : null}
                     Unsubscribed leads and leads without an email are excluded automatically.
                   </p>
                 </>
@@ -324,8 +341,13 @@ function ComposeInner() {
             <div className="card pad">
               <h3 style={{ marginTop: 0 }}>Email settings</h3>
               <label className="field mt12"><span>Campaign name</span><input className="input" value={form.name} onChange={set('name')} /></label>
+              <label className="field mt12"><span>Send from</span>
+                <select className="input" value={effectiveFrom} onChange={(e) => setFromAddress(e.target.value)}>
+                  {senders.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
               <div className="row gap12 mt12">
-                <label className="field grow"><span>From name</span><input className="input" value={form.fromName} onChange={set('fromName')} placeholder="lagosMailer Team" /></label>
+                <label className="field grow"><span>From name</span><input className="input" value={form.fromName} onChange={set('fromName')} placeholder="Native Harlem" /></label>
                 <label className="field grow"><span>Reply-To</span><input className="input" value={form.replyTo} onChange={set('replyTo')} placeholder="support@…" /></label>
               </div>
 

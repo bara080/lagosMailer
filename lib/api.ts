@@ -37,6 +37,7 @@ export interface Campaign {
   html: string;
   text: string;
   fromName: string;
+  fromAddress: string;
   replyTo: string;
   audience: AudienceFilter;
   status: 'draft' | 'sending' | 'completed' | 'paused' | 'scheduled';
@@ -58,8 +59,9 @@ export interface AudienceFilter {
   source?: string;
   q?: string;
   ids?: number[];
-  emails?: string[]; // custom explicit recipient list (for testing)
-  limit?: number;    // cap the audience to the first N (safe batch)
+  emails?: string[];     // custom explicit recipient list (for testing)
+  limit?: number;        // cap the audience to the first N (safe batch)
+  skipEmailed?: boolean; // exclude leads already emailed (contacted_at) — rolling batches
 }
 
 export interface Stats {
@@ -88,7 +90,7 @@ export interface Signature {
   socials: { instagram?: string; tiktok?: string; facebook?: string; x?: string };
 }
 
-export interface Config { smtpReady: boolean; from: string; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; }
+export interface Config { smtpReady: boolean; from: string; senders: string[]; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; }
 
 import { getCompany } from './companies';
 

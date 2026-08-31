@@ -400,6 +400,9 @@ export async function resolveAudience(company, f = {}) {
     }
   }
   if (f.emailOnly !== false) leads = leads.filter((l) => l.email && l.stage !== 'unsub');
+  // Rolling batches: exclude anyone already emailed (has contacted_at) so a new
+  // "send N" continues from where the last one stopped — no repeats across sends.
+  if (f.skipEmailed) leads = leads.filter((l) => !l.contacted_at);
   return cap(leads);
 }
 
@@ -422,6 +425,7 @@ export async function addCampaign(company, data) {
     html: data.html || '',
     text: data.text || '',
     fromName: data.fromName || '',
+    fromAddress: data.fromAddress || '', // chosen "send from" address (else per-company default)
     replyTo: data.replyTo || '',
     audience: data.audience || {},
     attachments: Array.isArray(data.attachments) ? data.attachments : [], // flyers/images

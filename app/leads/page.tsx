@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet } from 'lucide-react';
 import Topbar from '@/components/Topbar';
@@ -41,6 +41,14 @@ export default function LeadsPage() {
   const leads = data?.leads ?? [];
   const counts = data?.counts ?? {};
   const open = useMemo(() => leads.find((l) => l.id === openId) ?? null, [leads, openId]);
+
+  // Client-side pagination for large lead lists.
+  const PER_PAGE = 50;
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(leads.length / PER_PAGE));
+  const curPage = Math.min(page, pageCount);
+  const pageLeads = useMemo(() => leads.slice((curPage - 1) * PER_PAGE, curPage * PER_PAGE), [leads, curPage]);
+  useEffect(() => { setPage(1); }, [tab, q]); // reset to page 1 when filter/search changes
 
   function toggle(id: number) {
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -102,7 +110,7 @@ export default function LeadsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads.map((l) => (
+                  {pageLeads.map((l) => (
                     <tr key={l.id} style={{ cursor: 'pointer', background: openId === l.id ? 'var(--surface-2)' : undefined }}>
                       <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)} /></td>
                       <td onClick={() => setOpenId(l.id)}>
@@ -121,6 +129,18 @@ export default function LeadsPage() {
                   ))}
                 </tbody>
               </table>
+            )}
+            {leads.length > PER_PAGE && (
+              <div className="row between" style={{ padding: '12px 14px', borderTop: '1px solid var(--border)' }}>
+                <span className="faint" style={{ fontSize: 12.5 }}>
+                  Showing <b>{(curPage - 1) * PER_PAGE + 1}</b>–<b>{Math.min(curPage * PER_PAGE, leads.length)}</b> of <b>{leads.length.toLocaleString()}</b>
+                </span>
+                <span className="row gap8">
+                  <button className="btn ghost sm" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)}>← Prev</button>
+                  <span className="faint" style={{ fontSize: 12.5 }}>Page {curPage} / {pageCount}</span>
+                  <button className="btn ghost sm" disabled={curPage >= pageCount} onClick={() => setPage(curPage + 1)}>Next →</button>
+                </span>
+              </div>
             )}
           </div>
 
