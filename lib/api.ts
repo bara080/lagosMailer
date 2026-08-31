@@ -40,7 +40,7 @@ export interface Campaign {
   fromAddress: string;
   replyTo: string;
   audience: AudienceFilter;
-  status: 'draft' | 'sending' | 'completed' | 'paused' | 'scheduled';
+  status: 'draft' | 'sending' | 'completed' | 'paused' | 'scheduled' | 'stopped';
   recipients: number;
   sent: number;
   delivered: number;
@@ -152,7 +152,7 @@ export const api = {
   // campaign (it loops this until `done`).
   sendCampaignBatch: (id: number, dryRun: boolean, size?: number) =>
     req<SendProgress>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun, size }) }),
-  controlCampaign: (id: number, action: 'pause' | 'stop' | 'resume') =>
+  controlCampaign: (id: number, action: 'pause' | 'stop' | 'resume' | 'resend') =>
     req<{ ok: boolean; action: string }>(`/api/campaigns/${id}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
   testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),

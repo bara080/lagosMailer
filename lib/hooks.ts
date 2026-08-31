@@ -109,7 +109,7 @@ export function useControlCampaign() {
   return useMutation({
     // Pause/stop/resume just set/clear the control flag. Resume flips it back to
     // sending; the cron then drains the remaining queue in the background.
-    mutationFn: async ({ id, action }: { id: number; action: 'pause' | 'stop' | 'resume' }) => {
+    mutationFn: async ({ id, action }: { id: number; action: 'pause' | 'stop' | 'resume' | 'resend' }) => {
       await api.controlCampaign(id, action);
       return null;
     },

@@ -91,7 +91,25 @@ export default function CampaignsPage() {
                           ) : c.status === 'paused' ? (
                             <button className="btn sm" title="Resume" onClick={() => control.mutate({ id: c.id, action: 'resume' })}><Play size={14} /></button>
                           ) : (
-                            <button className="btn sm" title="Send" onClick={async () => { if (await confirm({ title: 'Send this campaign?', message: <>Send <b>“{c.name}”</b> to <b>{c.recipients.toLocaleString()}</b> recipient(s). This sends real emails and can’t be undone.</>, confirmLabel: `Send to ${c.recipients}`, danger: c.recipients >= 50, requireText: c.recipients >= 50 ? String(c.recipients) : undefined })) send.mutate({ id: c.id, dryRun: false }); }}><Play size={14} /></button>
+                            (() => {
+                              const isResend = c.status === 'completed' || c.status === 'stopped';
+                              return (
+                                <button className="btn sm" title={isResend ? 'Re-send' : 'Send'} onClick={async () => {
+                                  const ok = await confirm({
+                                    title: isResend ? 'Re-send this campaign?' : 'Send this campaign?',
+                                    message: isResend
+                                      ? <>Re-send <b>“{c.name}”</b> to <b>{c.recipients.toLocaleString()}</b> recipient(s)? <b>Everyone will receive it again.</b></>
+                                      : <>Send <b>“{c.name}”</b> to <b>{c.recipients.toLocaleString()}</b> recipient(s). This sends real emails and can’t be undone.</>,
+                                    confirmLabel: isResend ? `Re-send to ${c.recipients}` : `Send to ${c.recipients}`,
+                                    danger: isResend || c.recipients >= 50,
+                                    requireText: c.recipients >= 50 ? String(c.recipients) : undefined,
+                                  });
+                                  if (!ok) return;
+                                  if (isResend) await control.mutateAsync({ id: c.id, action: 'resend' });
+                                  send.mutate({ id: c.id, dryRun: false });
+                                }}><Play size={14} /></button>
+                              );
+                            })()
                           )}
                           <div className="usermenu">
                             <button className="btn ghost sm" title="More" onClick={() => setMenu(menu === c.id ? null : c.id)}><MoreVertical size={14} /></button>

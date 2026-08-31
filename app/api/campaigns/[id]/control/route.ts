@@ -26,6 +26,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await store.clearControl(co, cid);
       // Flip back to sending so the background cron drains the remaining queue.
       await store.updateCampaign(co, cid, { status: 'sending' });
+    } else if (action === 'resend') {
+      // Re-send a finished campaign: clear the idempotency set + queue + counters
+      // so the next kick re-resolves the audience and emails everyone AGAIN.
+      await store.clearControl(co, cid);
+      await store.updateCampaign(co, cid, { status: 'draft', queue: null, sentTo: [], sent: 0, delivered: 0 });
     } else {
       return NextResponse.json({ error: 'unknown action' }, { status: 400 });
     }
