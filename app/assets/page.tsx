@@ -1,10 +1,11 @@
 'use client';
 import { useRef, useState } from 'react';
-import { Upload, Trash2, Copy, Check, Image as ImageIcon, FileText, FolderOpen } from 'lucide-react';
+import { Upload, Trash2, Copy, Check, Image as ImageIcon, FileText, FolderOpen, X, ExternalLink } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useAssets, useUploadAsset, useDeleteAsset, useRegisterAssetUrl } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { EmptyState } from '@/components/ui';
+import type { Asset } from '@/lib/api';
 
 export default function AssetsPage() {
   const { data, isLoading } = useAssets();
@@ -20,6 +21,7 @@ export default function AssetsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
+  const [viewing, setViewing] = useState<Asset | null>(null); // click-to-view lightbox
 
   async function addUrl() {
     const url = urlInput.trim();
@@ -95,11 +97,11 @@ export default function AssetsPage() {
               <div className="assets-grid">
                 {assets.map((a) => (
                   <div key={a.id} className="asset-card">
-                    <div className="asset-thumb">
+                    <button type="button" className="asset-thumb" onClick={() => setViewing(a)} title="Click to view">
                       {isImage(a.contentType)
                         ? <img src={a.url} alt={a.name} loading="lazy" decoding="async" />
                         : <div className="asset-file"><FileText size={30} /></div>}
-                    </div>
+                    </button>
                     <div className="asset-meta">
                       <div className="row gap6" style={{ minWidth: 0 }}>
                         {isImage(a.contentType) ? <ImageIcon size={13} /> : <FileText size={13} />}
@@ -126,6 +128,28 @@ export default function AssetsPage() {
           To use an asset in an email: open <b>Compose → Content</b> and click <b>Add file</b>, or copy a link here and paste it (e.g. as your signature logo).
         </p>
       </div>
+
+      {/* Click-to-view lightbox */}
+      {viewing && (
+        <div className="modal-overlay" onClick={() => setViewing(null)}>
+          <div className="lightbox" onClick={(e) => e.stopPropagation()}>
+            <div className="lightbox-head">
+              <span className="asset-name" title={viewing.name}>{viewing.name}</span>
+              <span className="row gap8">
+                <span className="faint" style={{ fontSize: 12 }}>{kb(viewing.size)}</span>
+                <a className="btn ghost sm" href={viewing.url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open</a>
+                <button className="btn ghost sm" onClick={() => copyLink(viewing.url)}>{copied === viewing.url ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy link</>}</button>
+                <button className="icon-btn" title="Close" onClick={() => setViewing(null)}><X size={16} /></button>
+              </span>
+            </div>
+            <div className="lightbox-body">
+              {isImage(viewing.contentType)
+                ? <img src={viewing.url} alt={viewing.name} />
+                : <div className="stack gap8" style={{ alignItems: 'center', padding: 40 }}><FileText size={48} className="faint" /><a className="btn" href={viewing.url} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open file</a></div>}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
