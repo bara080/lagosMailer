@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle } from 'lucide-react';
+import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
 import { useCampaigns, useSendCampaign, useControlCampaign } from '@/lib/hooks';
@@ -28,6 +28,10 @@ export default function CampaignsPage() {
   const control = useControlCampaign();
   const confirm = useConfirm();
   const [menu, setMenu] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<Campaign | null>(null); // view campaign content (sent or draft)
+  const fillSample = (s: string) => (s || '')
+    .replace(/\{\{name\}\}/g, 'there').replace(/\{\{business\}\}/g, 'your business')
+    .replace(/\{\{category\}\}/g, '').replace(/\{\{email\}\}/g, 'you@example.com');
   const counts = data?.counts ?? {};
   const campaigns = (data?.campaigns ?? []).filter((c) => tab === 'all' || c.status === tab);
 
@@ -85,7 +89,7 @@ export default function CampaignsPage() {
                       <td className="faint">{c.created_at.slice(0, 10)}</td>
                       <td>
                         <div className="row gap6">
-                          <button className="btn ghost sm" title="Preview (dry run)" onClick={() => send.mutate({ id: c.id, dryRun: true })}><Eye size={14} /></button>
+                          <button className="btn ghost sm" title="View email" onClick={() => setViewing(c)}><Eye size={14} /></button>
                           {c.status === 'sending' ? (
                             <button className="btn ghost sm" title="Pause" onClick={() => control.mutate({ id: c.id, action: 'pause' })}><Pause size={14} /></button>
                           ) : c.status === 'paused' ? (
@@ -137,6 +141,37 @@ export default function CampaignsPage() {
           </div>
         </div>
       </div>
+
+      {/* View campaign content (works for sent AND draft) */}
+      {viewing && (
+        <div className="modal-overlay" onClick={() => setViewing(null)}>
+          <div className="lightbox" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+            <div className="lightbox-head">
+              <span className="row gap8" style={{ minWidth: 0 }}>
+                <span className="asset-name" title={viewing.name}>{viewing.name}</span>
+                <StatusBadge status={viewing.status} />
+              </span>
+              <button className="icon-btn" title="Close" onClick={() => setViewing(null)}><X size={16} /></button>
+            </div>
+            <div className="lightbox-body" style={{ background: '#fff', color: '#111', display: 'block', padding: 22, overflowY: 'auto' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+                From: <b>{viewing.fromName || 'Team'}</b>{viewing.fromAddress ? ` <${viewing.fromAddress}>` : ''} · To: <b>{(viewing.recipients ?? 0).toLocaleString()}</b> recipient(s)
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>{fillSample(viewing.subject) || '(no subject)'}</div>
+              <div style={{ lineHeight: 1.55, fontSize: 14 }} dangerouslySetInnerHTML={{ __html: fillSample(viewing.html) || '<i style="color:#999">No content</i>' }} />
+              {viewing.attachments && viewing.attachments.length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #eee', fontSize: 12, color: '#6b7280' }}>
+                  <Paperclip size={12} /> {viewing.attachments.length} attachment(s): {viewing.attachments.map((a) => a.name).join(', ')}
+                </div>
+              )}
+            </div>
+            <div className="lightbox-head" style={{ borderTop: '1px solid var(--border)', borderBottom: 0 }}>
+              <span className="faint" style={{ fontSize: 12 }}>Read-only preview{viewing.status === 'draft' ? ' — open in Compose to edit (coming soon)' : ''}</span>
+              <button className="btn ghost sm" onClick={() => setViewing(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

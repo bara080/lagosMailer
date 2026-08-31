@@ -80,6 +80,10 @@ export function useCampaigns() {
   });
 }
 
+export function useCampaign(id: number | null) {
+  return useQuery({ queryKey: ['campaign', id], queryFn: () => api.campaign(id as number), enabled: !!id });
+}
+
 export function useCreateCampaign() {
   const qc = useQueryClient();
   return useMutation({
