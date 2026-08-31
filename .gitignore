@@ -17,3 +17,7 @@ data/
 # Local scratch notes
 todo.md
 brain.md
+performance.md
+.agents/
+.claude/
+skills-lock.json

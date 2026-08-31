@@ -1,11 +1,11 @@
 'use client';
 import { Suspense, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-react';
+import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText, Images } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
-import type { Lead, Attachment } from '@/lib/api';
+import type { Lead, Attachment, Asset } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
 // "[First name]" — never raw `{{name}}` and never HTML. The user types plain
@@ -142,6 +142,14 @@ function ComposeInner() {
   }
   const removeAttachment = (url: string) => setAttachments((a) => a.filter((x) => x.url !== url));
   const toggleInline = (url: string) => setAttachments((a) => a.map((x) => x.url === url ? { ...x, inline: !x.inline } : x));
+
+  // Pick an already-uploaded asset from the library (no re-upload).
+  const [pickerOpen, setPickerOpen] = useState(false);
+  function addFromLibrary(a: Asset) {
+    if (attachments.some((x) => x.url === a.url)) return; // already attached
+    const isImg = (a.contentType || '').startsWith('image/');
+    setAttachments((prev) => [...prev, { url: a.url, name: a.name, contentType: a.contentType, size: a.size, inline: isImg }]);
+  }
 
   async function sendTest() {
     setTestMsg('Sending test…');
@@ -340,11 +348,42 @@ function ComposeInner() {
               <div className="mt16">
                 <div className="row between">
                   <span style={{ color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>Attachments</span>
-                  <label className="btn ghost sm" style={{ cursor: blobReady ? 'pointer' : 'not-allowed', opacity: blobReady ? 1 : 0.5 }}>
-                    <Paperclip size={14} /> Add file
-                    <input type="file" multiple hidden disabled={!blobReady || upload.isPending} onChange={(e) => { onFiles(e.target.files); e.target.value = ''; }} />
-                  </label>
+                  <span className="row gap6">
+                    <button type="button" className="btn ghost sm" onClick={() => setPickerOpen((o) => !o)}>
+                      <Images size={14} /> Library{assetData?.assets?.length ? ` (${assetData.assets.length})` : ''}
+                    </button>
+                    <label className="btn ghost sm" style={{ cursor: blobReady ? 'pointer' : 'not-allowed', opacity: blobReady ? 1 : 0.5 }}>
+                      <Paperclip size={14} /> Add file
+                      <input type="file" multiple hidden disabled={!blobReady || upload.isPending} onChange={(e) => { onFiles(e.target.files); e.target.value = ''; }} />
+                    </label>
+                  </span>
                 </div>
+
+                {/* Asset library picker — choose an already-uploaded asset (no re-upload) */}
+                {pickerOpen && (
+                  <div className="card mt8" style={{ padding: 10, maxHeight: 260, overflowY: 'auto' }}>
+                    {!assetData?.assets?.length ? (
+                      <p className="faint" style={{ fontSize: 12, margin: 4 }}>No assets yet — upload one, or add from the Assets page.</p>
+                    ) : (
+                      <div className="assets-picker-grid">
+                        {assetData.assets.map((a) => {
+                          const added = attachments.some((x) => x.url === a.url);
+                          const isImg = (a.contentType || '').startsWith('image/');
+                          return (
+                            <button key={a.id} type="button" className="asset-pick" disabled={added}
+                              onClick={() => { addFromLibrary(a); }} title={added ? 'Already added' : `Add ${a.name}`}>
+                              <span className="asset-pick-thumb">
+                                {isImg ? <img src={a.url} alt="" loading="lazy" decoding="async" /> : <FileText size={22} />}
+                              </span>
+                              <span className="asset-pick-name">{a.name}</span>
+                              {added && <span className="asset-pick-added"><Check size={12} /></span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!blobReady && <p className="faint mt8" style={{ fontSize: 12 }}>Uploads need Vercel Blob (<code>BLOB_READ_WRITE_TOKEN</code>). Until then, paste an image URL below to include it.</p>}
                 <div className="row gap8 mt8">
                   <input className="input" style={{ fontSize: 13 }} value={urlInput} onChange={(e) => setUrlInput(e.target.value)}

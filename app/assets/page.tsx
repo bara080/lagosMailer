@@ -97,7 +97,7 @@ export default function AssetsPage() {
                   <div key={a.id} className="asset-card">
                     <div className="asset-thumb">
                       {isImage(a.contentType)
-                        ? <img src={a.url} alt={a.name} />
+                        ? <img src={a.url} alt={a.name} loading="lazy" decoding="async" />
                         : <div className="asset-file"><FileText size={30} /></div>}
                     </div>
                     <div className="asset-meta">
@@ -111,9 +111,9 @@ export default function AssetsPage() {
                       <button className="btn ghost sm" onClick={() => copyLink(a.url)} title="Copy link to use">
                         {copied === a.url ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy link</>}
                       </button>
-                      <button className="btn ghost sm danger" disabled={del.isPending}
+                      <button className="btn ghost sm" style={{ color: 'var(--red)', flex: '0 0 auto' }} disabled={del.isPending}
                         onClick={async () => { if (await confirm({ title: 'Delete asset?', message: <>Delete <b>“{a.name}”</b>? This can’t be undone.</>, confirmLabel: 'Delete', danger: true })) del.mutate(a.id); }} title="Delete">
-                        <Trash2 size={13} />
+                        <Trash2 size={14} /> Delete
                       </button>
                     </div>
                   </div>

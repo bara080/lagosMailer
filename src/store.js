@@ -263,6 +263,12 @@ export async function listAssets(company) {
 }
 export async function addAsset(company, asset) {
   const assets = await kvGet(company, 'assets', []);
+  // Dedup: re-adding the same file (same URL, or same filename + byte size) returns
+  // the existing asset instead of piling up duplicates.
+  const dup = assets.find((a) =>
+    (asset.url && a.url === asset.url) ||
+    (a.name === asset.name && a.size === asset.size && (asset.size || 0) > 0));
+  if (dup) return dup;
   const id = assets.reduce((m, a) => Math.max(m, a.id || 0), 0) + 1;
   const row = { id, at: new Date().toISOString(), ...asset };
   assets.unshift(row);

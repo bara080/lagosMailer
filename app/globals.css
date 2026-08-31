@@ -237,6 +237,15 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .asset-actions { display: flex; gap: 6px; padding: 6px 11px 11px; }
 .asset-actions .btn { flex: 1; justify-content: center; }
 .asset-actions .btn.danger { flex: 0 0 auto; color: var(--red); }
+/* Compose asset-library picker */
+.assets-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.asset-pick { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 5px; text-align: left; }
+.asset-pick:hover:not(:disabled) { border-color: var(--accent); }
+.asset-pick:disabled { opacity: .55; cursor: default; }
+.asset-pick-thumb { aspect-ratio: 1; background: var(--surface-3); border-radius: 6px; overflow: hidden; display: grid; place-items: center; color: var(--text-dim); }
+.asset-pick-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.asset-pick-name { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-pick-added { position: absolute; top: 5px; right: 5px; background: var(--green); color: #04140b; border-radius: 50%; width: 18px; height: 18px; display: grid; place-items: center; }
 
 /* ── Progress bars (campaign metrics) ──────────────────────────────────── */
 .metric-cell { min-width: 96px; }
