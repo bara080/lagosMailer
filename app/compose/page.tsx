@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText, Images } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
-import { useConfig, useCreateCampaign, useLeads, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
+import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
 import type { Lead, Attachment, Asset } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
@@ -38,6 +38,26 @@ function toBackend(tpl: string) {
   let out = tpl || '';
   for (const t of TOKENS) out = out.replaceAll(t.token, t.backend);
   return out;
+}
+
+// Reverse of toBackend — turn stored `{{…}}` tokens back into the readable
+// tokens the editor shows. Used when loading a saved campaign into Compose.
+function toFriendly(tpl: string) {
+  let out = tpl || '';
+  for (const t of TOKENS) out = out.replaceAll(t.backend, t.token);
+  return out;
+}
+
+// Best-effort HTML → plain text, for older campaigns that saved only `html`.
+// (Campaigns composed here always keep `text`, so this is just a fallback.)
+function htmlToPlain(html: string) {
+  return (html || '')
+    .replace(/<br\s*\/?>(?=)/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -75,6 +95,9 @@ function ComposeInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const ids = useMemo(() => (sp.get('ids') || '').split(',').map(Number).filter(Boolean), [sp]);
+  // Edit/duplicate: /compose?from=<campaignId> loads that campaign's content.
+  const fromId = useMemo(() => { const v = Number(sp.get('from')); return v > 0 ? v : null; }, [sp]);
+  const { data: fromCampaign } = useCampaign(fromId);
 
   const [step, setStep] = useState(1);
   const [stage, setStage] = useState('all');
@@ -109,6 +132,7 @@ function ComposeInner() {
 
   const { data: config } = useConfig();
   const create = useCreateCampaign();
+  const update = useUpdateCampaign();
   const send = useSendCampaign();
   const test = useTestSend();
   const [testMsg, setTestMsg] = useState<string | null>(null);
@@ -181,35 +205,64 @@ function ComposeInner() {
   const senders = config?.senders ?? [];
   const effectiveFrom = fromAddress || config?.from || '';
 
-  const { data: leadData } = useLeads({ stage: ids.length ? 'all' : stage });
+  // Prefill from an existing campaign (?from=<id>). A draft edits IN PLACE; any
+  // other status loads as a reusable copy. Runs once when the campaign arrives.
+  const prefilled = useRef(false);
+  const isEditDraft = !!fromId && fromCampaign?.status === 'draft';
+  useEffect(() => {
+    if (!fromCampaign || prefilled.current) return;
+    prefilled.current = true;
+    const c = fromCampaign;
+    setForm({
+      name: c.status === 'draft' ? c.name : `${c.name} (copy)`,
+      fromName: c.fromName || '',
+      replyTo: c.replyTo || '',
+      subject: toFriendly(c.subject || ''),
+      message: toFriendly(c.text || '') || htmlToPlain(c.html || ''),
+    });
+    if (c.fromAddress) setFromAddress(c.fromAddress);
+    setAttachments(Array.isArray(c.attachments) ? c.attachments : []);
+    const a = c.audience || {};
+    if (Array.isArray(a.emails) && a.emails.length) {
+      setMode('custom');
+      setCustomEmails(a.emails.join(', '));
+    } else {
+      setMode('audience');
+      if (a.stage) setStage(a.stage);
+      if (a.skipEmailed !== undefined) setSkipEmailed(!!a.skipEmailed);
+    }
+    if (a.limit) setLimit(String(a.limit));
+  }, [fromCampaign]);
+
   const customList = useMemo(
     () => customEmails.split(/[\s,;]+/).map((s) => s.trim()).filter((e) => /^\S+@\S+\.\S+$/.test(e)),
     [customEmails],
   );
   const cap = parseInt(limit, 10);
 
-  // Leads matching the current audience filter (used for the sample preview).
-  const allEmailable = useMemo(() => {
-    const all = leadData?.leads ?? [];
-    const base = ids.length ? all.filter((l) => ids.includes(l.id)) : all;
-    return base.filter((l) => l.email && l.stage !== 'unsub');
-  }, [leadData, ids, stage]);
-  // Rolling batches: exclude leads already emailed (have contacted_at).
-  const audienceLeads = useMemo(
-    () => (skipEmailed ? allEmailable.filter((l) => !l.contacted_at) : allEmailable),
-    [allEmailable, skipEmailed],
+  // Live audience size + sample, computed DB-side (accurate at 63k — the Leads
+  // API only returns one page, so we can't count client-side any more). Only the
+  // "My leads" path needs it; custom emails are counted client-side.
+  const previewFilter = useMemo(
+    () => (ids.length ? { ids, skipEmailed, emailOnly: true } : { stage, skipEmailed, emailOnly: true }),
+    [ids, stage, skipEmailed],
   );
-  const alreadyEmailed = allEmailable.length - audienceLeads.length;
+  const { data: audPreview } = useAudiencePreview(previewFilter, mode === 'audience');
+  const emailableCount = audPreview?.emailable ?? 0;
+  const remainingCount = mode === 'custom'
+    ? customList.length
+    : (skipEmailed ? (audPreview?.remaining ?? 0) : emailableCount);
+  const alreadyEmailed = Math.max(0, emailableCount - (audPreview?.remaining ?? 0));
 
   // How many will actually receive it (mode + cap aware).
   const recipientCount = useMemo(() => {
-    const n = mode === 'custom' ? customList.length : audienceLeads.length;
+    const n = remainingCount;
     return cap > 0 ? Math.min(n, cap) : n;
-  }, [mode, customList, audienceLeads, cap]);
+  }, [remainingCount, cap]);
 
   const sample = mode === 'custom'
     ? { name: '', business: '', category: '', email: customList[0] || 'you@example.com' }
-    : audienceLeads[0] ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' };
+    : (audPreview?.sample ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' });
   const sampleLabel = sample.name || sample.business || (mode === 'custom' ? (customList[0] || 'a contact') : 'a contact');
 
   const audience = mode === 'custom'
@@ -232,14 +285,18 @@ function ComposeInner() {
 
   async function finalize(dryRun: boolean) {
     setResult(null);
-    const camp = await create.mutateAsync({
+    const payload = {
       name: form.name,
       subject: toBackend(form.subject),
       html: plainToHtml(toBackend(form.message)),
       text: toBackend(form.message),
       fromName: form.fromName, fromAddress: effectiveFrom, replyTo: form.replyTo, audience, status: 'draft',
       attachments,
-    } as any);
+    };
+    // Editing an existing draft updates it in place; otherwise create a new one.
+    const camp = isEditDraft
+      ? await update.mutateAsync({ id: fromId as number, body: payload as any })
+      : await create.mutateAsync(payload as any);
     // Kick the first batch; real sends then finish in the background via the cron.
     const out: any = await send.mutateAsync({ id: camp.id, dryRun });
     if (dryRun) {
@@ -251,7 +308,7 @@ function ComposeInner() {
 
   return (
     <>
-      <Topbar title="Compose Campaign"
+      <Topbar title={isEditDraft ? 'Edit Draft' : fromId ? 'Duplicate Campaign' : 'Compose Campaign'}
         actions={<>
           <button className="btn ghost" onClick={() => router.push('/campaigns')}>Save Draft</button>
           {step > 1 && <button className="btn ghost" onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>}
@@ -301,7 +358,7 @@ function ComposeInner() {
                     <textarea className="input" style={{ minHeight: 90 }} value={customEmails} onChange={(e) => setCustomEmails(e.target.value)}
                       placeholder={'you@example.com, colleague@example.com\n(one per line or comma-separated)'} />
                   </label>
-                  <p className="faint mt8" style={{ fontSize: 12 }}>Great for a real test — sends to exactly these addresses, not your 584 leads. {customList.length > 0 && <b>{customList.length} valid</b>}</p>
+                  <p className="faint mt8" style={{ fontSize: 12 }}>Great for a real test — sends to exactly these addresses, not your saved leads. {customList.length > 0 && <b>{customList.length} valid</b>}</p>
                 </>
               ) : (
                 <>
@@ -318,8 +375,8 @@ function ComposeInner() {
                     <span>Skip leads I’ve already emailed <b className="faint">(rolling batches — no repeats)</b></span>
                   </label>
                   <p className="faint mt12" style={{ fontSize: 12 }}>
-                    {skipEmailed && alreadyEmailed > 0 ? <><b>{alreadyEmailed.toLocaleString()}</b> already emailed (excluded). <b>{audienceLeads.length.toLocaleString()}</b> not yet emailed.<br /></> : null}
-                    {cap > 0 ? <>This send: the next <b>{Math.min(audienceLeads.length, cap)}</b> of {audienceLeads.length.toLocaleString()} remaining. Run it again to continue. </> : null}
+                    {skipEmailed && alreadyEmailed > 0 ? <><b>{alreadyEmailed.toLocaleString()}</b> already emailed (excluded). <b>{remainingCount.toLocaleString()}</b> not yet emailed.<br /></> : null}
+                    {cap > 0 ? <>This send: the next <b>{Math.min(remainingCount, cap).toLocaleString()}</b> of {remainingCount.toLocaleString()} remaining. Run it again to continue. </> : null}
                     Unsubscribed leads and leads without an email are excluded automatically.
                   </p>
                 </>

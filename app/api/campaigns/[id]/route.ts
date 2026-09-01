@@ -17,6 +17,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const company = req.headers.get('x-company') || 'LagosTSQ';
     const { id } = await params;
     const body = await req.json();
+    // If the audience changed (e.g. editing a draft in Compose), recompute the
+    // recipient count DB-side so the campaign row stays accurate.
+    if (body.audience && body.recipients === undefined) {
+      body.recipients = await store.audienceCount(company, body.audience);
+    }
     return NextResponse.json(await store.updateCampaign(company, id, body));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

@@ -57,15 +57,6 @@ async function kvSet(company, collection, value) {
   return value;
 }
 
-function seed() {
-  const now = new Date().toISOString();
-  return [
-    { business: 'Lagos Cuts Barber', email: 'demo1@example.com', name: 'Tunde', category: 'barber', stage: 'new' },
-    { business: 'Ikeja Nail Studio', email: 'demo2@example.com', name: 'Ada', category: 'salon', stage: 'new' },
-    { business: 'Victoria Island Spa', email: 'demo3@example.com', name: 'Ngozi', category: 'spa', stage: 'contacted' },
-  ].map((r, i) => normalize({ id: i + 1, created_at: now, ...r }));
-}
-
 // Fill in every field so the UI never sees `undefined`.
 function normalize(r) {
   return {
@@ -88,85 +79,120 @@ function normalize(r) {
   };
 }
 
-// Read all leads for a company, seeding the 3 demo leads the first time (key
-// absent). Each company seeds independently on first access.
-async function readAll(company) {
-  const existing = await kvGet(company, 'leads', null);
-  if (existing === null) {
-    const seeded = seed();
-    await kvSet(company, 'leads', seeded);
-    return seeded;
+// ── Leads: real Postgres table (one row per lead) ────────────────────────────
+// Leads live in their OWN table `leads` (PK: company, id) — NOT the crm_store
+// jsonb blob — so 63k+ rows read/write/paginate without loading everything at
+// once. See supabase/leads-table.sql for the schema.
+const LEADS = 'leads';
+
+// PostgREST caps a single response, so any full scan pages through in chunks.
+// `build` returns a FRESH query each call (a supabase query is single-use).
+async function fetchAllRows(build) {
+  const out = [];
+  const size = 1000;
+  for (let from = 0; ; from += size) {
+    const { data, error } = await build().range(from, from + size - 1);
+    if (error) throw new Error(`leads scan failed: ${error.message}`);
+    out.push(...(data || []));
+    if (!data || data.length < size) break;
   }
-  return existing;
+  return out;
 }
 
-async function writeAll(company, leads) {
-  await kvSet(company, 'leads', leads);
-  return leads;
+// Next per-company id = max(id)+1. Ids are app-assigned (rare concurrent writes
+// in an admin tool); the migration/import assign a contiguous block up front.
+async function nextLeadId(company) {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(LEADS).select('id').eq('company', company)
+    .order('id', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`leads nextId failed: ${error.message}`);
+  return (data?.id || 0) + 1;
 }
 
-function nextId(leads) {
-  return leads.reduce((m, l) => Math.max(m, l.id || 0), 0) + 1;
+// Apply the stage / search filters shared by list + audience.
+function leadFilter(query, { stage, q } = {}) {
+  if (stage && stage !== 'all') query = query.eq('stage', stage);
+  if (q) {
+    const s = String(q).replace(/[%,()]/g, ' ').trim();
+    if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%,category.ilike.%${s}%,instagram.ilike.%${s}%`);
+  }
+  return query;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function list(company, { stage, q } = {}) {
-  let leads = await readAll(company);
-  if (stage && stage !== 'all') {
-    const tab = STAGE_TABS.find((t) => t.key === stage);
-    if (tab) leads = leads.filter(tab.match);
+// Server-side paginated list. Pass a finite `limit` for one page (+ exact
+// total); omit it to scan every matching row. Returns { leads, total }.
+export async function listPage(company, { stage, q, limit, offset } = {}) {
+  const sb = getSupabase();
+  const applied = (query) => leadFilter(query, { stage, q }).order('created_at', { ascending: false });
+  if (Number.isFinite(limit)) {
+    const from = offset || 0;
+    const { data, error, count } = await applied(
+      sb.from(LEADS).select('*', { count: 'exact' }).eq('company', company),
+    ).range(from, from + limit - 1);
+    if (error) throw new Error(`leads list failed: ${error.message}`);
+    return { leads: (data || []).map(normalize), total: count ?? 0 };
   }
-  if (q) {
-    const s = q.toLowerCase();
-    leads = leads.filter((l) =>
-      [l.business, l.name, l.email, l.category, l.instagram].some((v) => (v || '').toLowerCase().includes(s)),
-    );
-  }
-  return leads.sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+  const rows = await fetchAllRows(() => applied(sb.from(LEADS).select('*').eq('company', company)));
+  return { leads: rows.map(normalize), total: rows.length };
+}
+
+// Array-returning list (backward-compatible with existing callers).
+export async function list(company, opts = {}) {
+  return (await listPage(company, opts)).leads;
 }
 
 export async function counts(company) {
-  const leads = await readAll(company);
-  const out = {};
-  for (const t of STAGE_TABS) out[t.key] = leads.filter(t.match).length;
+  const sb = getSupabase();
+  const head = () => sb.from(LEADS).select('*', { count: 'exact', head: true }).eq('company', company);
+  const stages = ['new', 'contacted', 'replied', 'qualified', 'won'];
+  const [all, ...rest] = await Promise.all([head(), ...stages.map((s) => head().eq('stage', s))]);
+  const out = { all: all.count ?? 0 };
+  stages.forEach((s, i) => { out[s] = rest[i].count ?? 0; });
   return out;
 }
 
 export async function add(company, input) {
-  const leads = await readAll(company);
-  const lead = normalize({ ...input, id: nextId(leads), created_at: new Date().toISOString() });
+  const sb = getSupabase();
+  const lead = normalize({ ...input, id: await nextLeadId(company), created_at: new Date().toISOString() });
   if (!lead.email && !lead.instagram) throw new Error('a lead needs an email or an instagram handle');
-  leads.push(lead);
-  await writeAll(company, leads);
+  if (lead.email) {
+    const { data: dup } = await sb.from(LEADS).select('id').eq('company', company).ilike('email', lead.email).limit(1).maybeSingle();
+    if (dup) throw new Error('a lead with that email already exists');
+  }
+  const { error } = await sb.from(LEADS).insert({ company, ...lead });
+  if (error) throw new Error(`lead add failed: ${error.message}`);
   return lead;
 }
 
 export async function update(company, id, patch) {
-  const leads = await readAll(company);
-  const i = leads.findIndex((l) => l.id === Number(id));
-  if (i === -1) throw new Error(`lead ${id} not found`);
-  leads[i] = normalize({ ...leads[i], ...patch, id: leads[i].id, created_at: leads[i].created_at });
-  await writeAll(company, leads);
-  return leads[i];
+  const sb = getSupabase();
+  const { data: cur, error: e1 } = await sb.from(LEADS).select('*').eq('company', company).eq('id', Number(id)).maybeSingle();
+  if (e1) throw new Error(`lead read failed: ${e1.message}`);
+  if (!cur) throw new Error(`lead ${id} not found`);
+  const next = normalize({ ...cur, ...patch, id: cur.id, created_at: cur.created_at });
+  const { error } = await sb.from(LEADS).update(next).eq('company', company).eq('id', cur.id);
+  if (error) throw new Error(`lead update failed: ${error.message}`);
+  return next;
 }
 
 export async function remove(company, id) {
-  const leads = (await readAll(company)).filter((l) => l.id !== Number(id));
-  await writeAll(company, leads);
+  const sb = getSupabase();
+  const { error } = await sb.from(LEADS).delete().eq('company', company).eq('id', Number(id));
+  if (error) throw new Error(`lead remove failed: ${error.message}`);
   return { ok: true };
 }
 
 // Advance a lead to `contacted` after a successful send (stage-guarded, like
 // zinga's operator_crm_mark_sent — only promotes from `new`).
 export async function markContacted(company, id, subject) {
-  const leads = await readAll(company);
-  const i = leads.findIndex((l) => l.id === Number(id));
-  if (i === -1) return;
-  if (leads[i].stage === 'new') leads[i].stage = 'contacted';
-  leads[i].contacted_at = new Date().toISOString();
-  if (subject) leads[i].subject = subject;
-  await writeAll(company, leads);
+  const sb = getSupabase();
+  const patch = { contacted_at: new Date().toISOString() };
+  if (subject) patch.subject = subject;
+  await sb.from(LEADS).update(patch).eq('company', company).eq('id', Number(id));
+  await sb.from(LEADS).update({ stage: 'contacted' }).eq('company', company).eq('id', Number(id)).eq('stage', 'new');
 }
 
 // Per-company settings blob (e.g. { sheetId, sheetRange }) stored in crm_store.
@@ -193,18 +219,28 @@ function pick(r, ...aliases) {
 // Import rows (from CSV or Google Sheets). Tolerant of common header names, e.g.
 // "Email Address", "Full Name", "Company", "Phone Number".
 export async function importCsv(company, rows) {
-  const leads = await readAll(company);
-  let added = 0;
+  const sb = getSupabase();
+  // Existing emails (email column only) → dedup set. Fast, slim scan.
+  const existing = await fetchAllRows(() => sb.from(LEADS).select('email').eq('company', company).neq('email', ''));
+  const seen = new Set(existing.map((r) => String(r.email || '').toLowerCase()));
+  let id = await nextLeadId(company);
+  const now = new Date().toISOString();
+  const toInsert = [];
   for (const r of rows) {
     const email = pick(r, 'email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail');
     const instagram = pick(r, 'instagram', 'ig', 'handle', 'instagram handle');
     if (!email && !instagram) continue;
-    if (email && leads.some((l) => l.email.toLowerCase() === email.toLowerCase())) continue; // dedup
-    leads.push(
-      normalize({
-        id: nextId(leads),
+    if (email) {
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue; // dedup vs existing + within this import
+      seen.add(key);
+    }
+    toInsert.push({
+      company,
+      ...normalize({
+        id: id++,
         business: pick(r, 'business', 'business_name', 'business name', 'company', 'company name', 'organization'),
-        name: pick(r, 'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name'),
+        name: pick(r, 'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name', 'guest name', 'guest'),
         email,
         instagram,
         phone: pick(r, 'phone', 'phone number', 'mobile', 'tel', 'telephone'),
@@ -213,12 +249,18 @@ export async function importCsv(company, rows) {
         borough: pick(r, 'borough', 'city', 'area', 'location'),
         source: pick(r, 'source') || 'import',
         subject: pick(r, 'subject'),
-        created_at: new Date().toISOString(),
+        created_at: now,
       }),
-    );
-    added++;
+    });
   }
-  await writeAll(company, leads);
+  // Batched inserts (1000/req) — never one giant payload, so no statement timeout.
+  let added = 0;
+  for (let i = 0; i < toInsert.length; i += 1000) {
+    const chunk = toInsert.slice(i, i + 1000);
+    const { error } = await sb.from(LEADS).insert(chunk);
+    if (error) throw new Error(`leads import failed at row ${i}: ${error.message}`);
+    added += chunk.length;
+  }
   return { added };
 }
 
@@ -284,7 +326,11 @@ export async function removeAsset(company, id) {
 
 // Aggregate everything the dashboard/home page needs, from real data.
 export async function dashboard(company) {
-  const leads = await readAll(company);
+  const sb = getSupabase();
+  // Slim projection (few columns) — enough for week windows + source segments,
+  // without pulling every field of every lead.
+  const leads = await fetchAllRows(() =>
+    sb.from(LEADS).select('source,stage,contacted_at,replied_at,created_at').eq('company', company));
   const sends = await kvGet(company, 'sends', []);
   const acts = await kvGet(company, 'activity', []);
   const c = await counts(company);
@@ -364,46 +410,101 @@ export async function setLastBlast(company, summary) {
 //                     to existing leads when possible, else synthetic targets.
 //   - ids / stage / category / source / q → filter the lead list
 //   - limit: N      → cap the audience to the first N (safe batch)
-export async function resolveAudience(company, f = {}) {
-  const cap = (arr) => (f.limit > 0 ? arr.slice(0, f.limit) : arr);
-  const all = await readAll(company);
-
-  // Custom explicit email list.
-  if (Array.isArray(f.emails) && f.emails.length) {
-    const byEmail = new Map(all.map((l) => [String(l.email || '').toLowerCase(), l]));
-    const seen = new Set();
-    const targets = [];
-    for (const raw of f.emails) {
-      const email = String(raw).trim();
-      if (!/^\S+@\S+\.\S+$/.test(email)) continue;
-      const key = email.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      targets.push(byEmail.get(key) || { id: null, email, name: '', business: '', category: '', source: 'custom', stage: 'new' });
-    }
-    return cap(targets);
+// Normalize + dedup an explicit email list into the original casings to query.
+function cleanEmails(list) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    const email = String(raw).trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
   }
+  return out;
+}
 
-  let leads = all;
+// Build the audience query (stage/category/source/q/ids + emailOnly/skipEmailed)
+// against the leads table for a given company.
+function audienceQuery(sb, company, f) {
+  let query = sb.from(LEADS).select('*').eq('company', company);
   if (f.ids && f.ids.length) {
-    leads = leads.filter((l) => f.ids.includes(l.id));
+    query = query.in('id', f.ids.map(Number));
   } else {
-    if (f.stage && f.stage !== 'all') {
-      const tab = STAGE_TABS.find((t) => t.key === f.stage);
-      leads = tab ? leads.filter(tab.match) : leads.filter((l) => l.stage === f.stage);
-    }
-    if (f.category) leads = leads.filter((l) => (l.category || '').toLowerCase() === f.category.toLowerCase());
-    if (f.source) leads = leads.filter((l) => l.source === f.source);
+    if (f.stage && f.stage !== 'all') query = query.eq('stage', f.stage);
+    if (f.category) query = query.ilike('category', f.category);
+    if (f.source) query = query.eq('source', f.source);
     if (f.q) {
-      const s = f.q.toLowerCase();
-      leads = leads.filter((l) => [l.business, l.name, l.email].some((v) => (v || '').toLowerCase().includes(s)));
+      const s = String(f.q).replace(/[%,()]/g, ' ').trim();
+      if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%`);
     }
   }
-  if (f.emailOnly !== false) leads = leads.filter((l) => l.email && l.stage !== 'unsub');
+  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub');
   // Rolling batches: exclude anyone already emailed (has contacted_at) so a new
   // "send N" continues from where the last one stopped — no repeats across sends.
-  if (f.skipEmailed) leads = leads.filter((l) => !l.contacted_at);
-  return cap(leads);
+  if (f.skipEmailed) query = query.is('contacted_at', null);
+  return query;
+}
+
+export async function resolveAudience(company, f = {}) {
+  const sb = getSupabase();
+
+  // Custom explicit email list → fetch matching leads (chunked IN), fall back to
+  // a synthetic target for addresses not in the CRM (still gets emailed).
+  if (Array.isArray(f.emails) && f.emails.length) {
+    const wanted = cleanEmails(f.emails);
+    const found = new Map();
+    for (let i = 0; i < wanted.length; i += 500) {
+      const chunk = wanted.slice(i, i + 500);
+      const { data, error } = await sb.from(LEADS).select('*').eq('company', company).in('email', chunk);
+      if (error) throw new Error(`audience emails failed: ${error.message}`);
+      for (const l of (data || [])) found.set(String(l.email).toLowerCase(), normalize(l));
+    }
+    const targets = wanted.map((email) =>
+      found.get(email.toLowerCase()) || { id: null, email, name: '', business: '', category: '', source: 'custom', stage: 'new' });
+    return f.limit > 0 ? targets.slice(0, f.limit) : targets;
+  }
+
+  // Limited (rolling batch) → one page is enough. Unlimited → scan all matches.
+  if (f.limit > 0) {
+    const { data, error } = await audienceQuery(sb, company, f).order('created_at', { ascending: false }).limit(f.limit);
+    if (error) throw new Error(`audience failed: ${error.message}`);
+    return (data || []).map(normalize);
+  }
+  const rows = await fetchAllRows(() => audienceQuery(sb, company, f).order('created_at', { ascending: false }));
+  return rows.map(normalize);
+}
+
+// Count-only audience size (no rows pulled) — used to stamp campaign.recipients.
+export async function audienceCount(company, f = {}) {
+  if (Array.isArray(f.emails) && f.emails.length) {
+    const n = cleanEmails(f.emails).length;
+    return f.limit > 0 ? Math.min(n, f.limit) : n;
+  }
+  const sb = getSupabase();
+  const { count, error } = await audienceCountQuery(sb, company, f);
+  if (error) throw new Error(`audience count failed: ${error.message}`);
+  return f.limit > 0 ? Math.min(count ?? 0, f.limit) : (count ?? 0);
+}
+
+// Same filters as audienceQuery but a head/count select (no rows returned).
+function audienceCountQuery(sb, company, f) {
+  let query = sb.from(LEADS).select('*', { count: 'exact', head: true }).eq('company', company);
+  if (f.ids && f.ids.length) {
+    query = query.in('id', f.ids.map(Number));
+  } else {
+    if (f.stage && f.stage !== 'all') query = query.eq('stage', f.stage);
+    if (f.category) query = query.ilike('category', f.category);
+    if (f.source) query = query.eq('source', f.source);
+    if (f.q) {
+      const s = String(f.q).replace(/[%,()]/g, ' ').trim();
+      if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%`);
+    }
+  }
+  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub');
+  if (f.skipEmailed) query = query.is('contacted_at', null);
+  return query;
 }
 
 export async function listCampaigns(company) {
@@ -440,7 +541,7 @@ export async function addCampaign(company, data) {
     sent_at: null,
     scheduled_at: data.scheduled_at || null,
   };
-  rec.recipients = (await resolveAudience(company, rec.audience)).length;
+  rec.recipients = await audienceCount(company, rec.audience);
   cs.push(rec);
   await kvSet(company, 'campaigns', cs);
   return rec;

@@ -1,6 +1,6 @@
 'use client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Campaign, type Lead, type SendProgress } from './api';
+import { api, type AudienceFilter, type Campaign, type Lead, type SendProgress } from './api';
 
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: 300_000 });
@@ -14,8 +14,19 @@ export function useStats() {
   return useQuery({ queryKey: ['stats'], queryFn: api.stats, refetchInterval: 15_000 });
 }
 
-export function useLeads(params: { stage?: string; q?: string }) {
-  return useQuery({ queryKey: ['leads', params], queryFn: () => api.leads(params) });
+export function useLeads(params: { stage?: string; q?: string; page?: number; limit?: number }) {
+  return useQuery({ queryKey: ['leads', params], queryFn: () => api.leads(params), placeholderData: (prev) => prev });
+}
+
+// Live audience size + sample for Compose (computed DB-side, so it's accurate
+// at 63k). Debounce the filter on the caller side if it changes rapidly.
+export function useAudiencePreview(f: AudienceFilter, enabled = true) {
+  return useQuery({
+    queryKey: ['audience', f],
+    queryFn: () => api.audiencePreview(f),
+    enabled,
+    placeholderData: (prev) => prev,
+  });
 }
 
 export function useAddLead() {
@@ -89,6 +100,17 @@ export function useCreateCampaign() {
   return useMutation({
     mutationFn: (body: Partial<Campaign>) => api.createCampaign(body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaigns'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}
+
+export function useUpdateCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Partial<Campaign> }) => api.updateCampaign(id, body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign', v.id] });
+    },
   });
 }
 

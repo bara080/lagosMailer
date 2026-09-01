@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip } from 'lucide-react';
+import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
 import { useCampaigns, useSendCampaign, useControlCampaign } from '@/lib/hooks';
@@ -121,12 +121,14 @@ export default function CampaignsPage() {
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setMenu(null)} />
                                 <div className="menu-pop" style={{ right: 0, left: 'auto' }}>
+                                  <button className="mi" onClick={() => { router.push(`/compose?from=${c.id}`); setMenu(null); }}>
+                                    {c.status === 'draft' ? <><FileEdit size={15} /> Edit in Compose</> : <><Copy size={15} /> Duplicate & edit</>}
+                                  </button>
                                   {c.status === 'sending' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'pause' }); setMenu(null); }}><Pause size={15} /> Pause</button>}
                                   {c.status === 'paused' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'resume' }); setMenu(null); }}><Play size={15} /> Resume</button>}
                                   {(c.status === 'sending' || c.status === 'paused') && (
                                     <button className="mi danger" onClick={async () => { setMenu(null); if (await confirm({ title: 'Stop this campaign?', message: <>Stop <b>“{c.name}”</b>? Unsent recipients will be skipped.</>, confirmLabel: 'Stop', danger: true })) control.mutate({ id: c.id, action: 'stop' }); }}><StopCircle size={15} /> Stop</button>
                                   )}
-                                  {c.status !== 'sending' && c.status !== 'paused' && <div className="menu-label">No actions for {c.status}</div>}
                                 </div>
                               </>
                             )}
@@ -166,8 +168,13 @@ export default function CampaignsPage() {
               )}
             </div>
             <div className="lightbox-head" style={{ borderTop: '1px solid var(--border)', borderBottom: 0 }}>
-              <span className="faint" style={{ fontSize: 12 }}>Read-only preview{viewing.status === 'draft' ? ' — open in Compose to edit (coming soon)' : ''}</span>
-              <button className="btn ghost sm" onClick={() => setViewing(null)}>Close</button>
+              <span className="faint" style={{ fontSize: 12 }}>Read-only preview</span>
+              <span className="row gap8">
+                <button className="btn ghost sm" onClick={() => setViewing(null)}>Close</button>
+                <button className="btn sm" onClick={() => router.push(`/compose?from=${viewing.id}`)}>
+                  {viewing.status === 'draft' ? <><FileEdit size={14} /> Edit in Compose</> : <><Copy size={14} /> Duplicate & edit</>}
+                </button>
+              </span>
             </div>
           </div>
         </div>

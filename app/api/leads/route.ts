@@ -6,9 +6,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const company = req.headers.get('x-company') || 'LagosTSQ';
-  const stage = req.nextUrl.searchParams.get('stage') || undefined;
-  const q = req.nextUrl.searchParams.get('q') || undefined;
-  return NextResponse.json({ leads: await store.list(company, { stage, q }), counts: await store.counts(company) });
+  const sp = req.nextUrl.searchParams;
+  const stage = sp.get('stage') || undefined;
+  const q = sp.get('q') || undefined;
+  const limit = Math.min(Math.max(Number(sp.get('limit')) || 50, 1), 200);
+  const page = Math.max(Number(sp.get('page')) || 1, 1);
+  const { leads, total } = await store.listPage(company, { stage, q, limit, offset: (page - 1) * limit });
+  return NextResponse.json({ leads, total, page, limit, counts: await store.counts(company) });
 }
 
 export async function POST(req: NextRequest) {

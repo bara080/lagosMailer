@@ -132,12 +132,16 @@ export const api = {
   me: () => req<Me>('/api/auth/me'),
   config: () => req<Config>('/api/config'),
   stats: () => req<Stats>('/api/stats'),
-  leads: (params: { stage?: string; q?: string } = {}) => {
+  leads: (params: { stage?: string; q?: string; page?: number; limit?: number } = {}) => {
     const s = new URLSearchParams();
     if (params.stage && params.stage !== 'all') s.set('stage', params.stage);
     if (params.q) s.set('q', params.q);
-    return req<{ leads: Lead[]; counts: Counts }>(`/api/leads?${s}`);
+    if (params.page) s.set('page', String(params.page));
+    if (params.limit) s.set('limit', String(params.limit));
+    return req<{ leads: Lead[]; total: number; page: number; limit: number; counts: Counts }>(`/api/leads?${s}`);
   },
+  audiencePreview: (f: AudienceFilter) =>
+    req<{ emailable: number; remaining: number; sample: Lead | null }>('/api/audience', { method: 'POST', body: JSON.stringify(f) }),
   addLead: (body: Partial<Lead>) => req<Lead>('/api/leads', { method: 'POST', body: JSON.stringify(body) }),
   updateLead: (id: number, body: Partial<Lead>) => req<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteLead: (id: number) => req<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' }),
