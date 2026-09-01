@@ -14,7 +14,7 @@ export function useStats() {
   return useQuery({ queryKey: ['stats'], queryFn: api.stats, refetchInterval: 15_000 });
 }
 
-export function useLeads(params: { stage?: string; q?: string; page?: number; limit?: number }) {
+export function useLeads(params: { stage?: string; q?: string; page?: number; limit?: number; hasPhone?: boolean }) {
   return useQuery({ queryKey: ['leads', params], queryFn: () => api.leads(params), placeholderData: (prev) => prev });
 }
 

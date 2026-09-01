@@ -265,6 +265,13 @@ function ComposeInner() {
     : (audPreview?.sample ?? { name: 'Tunde', business: 'Lagos Cuts', category: 'barber', email: 'sample@example.com' });
   const sampleLabel = sample.name || sample.business || (mode === 'custom' ? (customList[0] || 'a contact') : 'a contact');
 
+  // Daily send cap (safety). Sends beyond today's allowance auto-continue the
+  // next day via the cron, so we inform rather than block.
+  const dailyCap = config?.dailyCap ?? 500;
+  const sentToday = config?.sentToday ?? 0;
+  const capLeftToday = Math.max(0, dailyCap - sentToday);
+  const exceedsToday = recipientCount > capLeftToday;
+
   const audience = mode === 'custom'
     ? { emails: customList, limit: cap > 0 ? cap : undefined }
     : ids.length
@@ -379,6 +386,10 @@ function ComposeInner() {
                     {cap > 0 ? <>This send: the next <b>{Math.min(remainingCount, cap).toLocaleString()}</b> of {remainingCount.toLocaleString()} remaining. Run it again to continue. </> : null}
                     Unsubscribed leads and leads without an email are excluded automatically.
                   </p>
+                  <div className="mt12" style={{ fontSize: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <b>Daily cap:</b> {dailyCap.toLocaleString()}/day · <b>{sentToday.toLocaleString()}</b> sent today · <b>{capLeftToday.toLocaleString()}</b> left.
+                    {exceedsToday && capLeftToday >= 0 ? <><br /><span style={{ color: 'var(--amber)' }}>This send exceeds today’s cap — the first <b>{capLeftToday.toLocaleString()}</b> go out now, the rest continue automatically tomorrow.</span></> : null}
+                  </div>
                 </>
               )}
             </div>
@@ -575,6 +586,7 @@ function ComposeInner() {
             <div className="card pad detail">
               <h3 style={{ marginTop: 0 }}>Campaign Summary</h3>
               <div className="kv"><span className="k">Recipients</span><b>{recipientCount.toLocaleString()}</b></div>
+              <div className="kv"><span className="k">Daily cap</span><span>{sentToday.toLocaleString()} / {dailyCap.toLocaleString()} today · {capLeftToday.toLocaleString()} left</span></div>
               <div className="kv"><span className="k">Campaign</span><span>{form.name}</span></div>
               <div className="kv"><span className="k">Subject</span><span style={{ maxWidth: 150, textAlign: 'right' }}>{fill(form.subject, sample)}</span></div>
               <div className="kv"><span className="k">Track Opens</span><span className="faint">soon</span></div>

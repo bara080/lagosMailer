@@ -28,5 +28,7 @@ export async function GET(req: NextRequest) {
     sheetReady: sheet.ready, sheetHasCreds: sheet.hasCreds, sheetUrl: sheet.sheetUrl,
     company, stages: store.STAGES,
     signature: settings.signature || null,
+    dailyCap: await store.getDailyCap(company),
+    sentToday: await store.getSentToday(company),
   });
 }

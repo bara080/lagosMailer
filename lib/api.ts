@@ -90,7 +90,7 @@ export interface Signature {
   socials: { instagram?: string; tiktok?: string; facebook?: string; x?: string };
 }
 
-export interface Config { smtpReady: boolean; from: string; senders: string[]; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; }
+export interface Config { smtpReady: boolean; from: string; senders: string[]; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; dailyCap: number; sentToday: number; }
 
 import { getCompany } from './companies';
 
@@ -132,12 +132,13 @@ export const api = {
   me: () => req<Me>('/api/auth/me'),
   config: () => req<Config>('/api/config'),
   stats: () => req<Stats>('/api/stats'),
-  leads: (params: { stage?: string; q?: string; page?: number; limit?: number } = {}) => {
+  leads: (params: { stage?: string; q?: string; page?: number; limit?: number; hasPhone?: boolean } = {}) => {
     const s = new URLSearchParams();
     if (params.stage && params.stage !== 'all') s.set('stage', params.stage);
     if (params.q) s.set('q', params.q);
     if (params.page) s.set('page', String(params.page));
     if (params.limit) s.set('limit', String(params.limit));
+    if (params.hasPhone) s.set('hasPhone', '1');
     return req<{ leads: Lead[]; total: number; page: number; limit: number; counts: Counts }>(`/api/leads?${s}`);
   },
   audiencePreview: (f: AudienceFilter) =>
@@ -186,7 +187,7 @@ export const api = {
   },
   deleteAsset: (id: number) => req<{ ok: boolean }>(`/api/assets?id=${id}`, { method: 'DELETE' }),
   getSettings: () => req<{ settings: { signature?: Signature } }>('/api/settings'),
-  setSettings: (body: { signature?: Signature | null }) =>
+  setSettings: (body: { signature?: Signature | null; dailyCap?: number | null }) =>
     req<{ ok: boolean; settings: { signature?: Signature } }>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),
   blast: (body: { ids: number[]; subject: string; html: string; text: string; dryRun: boolean }) =>
     req<{ sent: number; total: number; dryRun: boolean; results: any[] }>('/api/blast', { method: 'POST', body: JSON.stringify(body) }),

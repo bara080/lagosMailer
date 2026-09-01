@@ -111,8 +111,9 @@ async function nextLeadId(company) {
 }
 
 // Apply the stage / search filters shared by list + audience.
-function leadFilter(query, { stage, q } = {}) {
+function leadFilter(query, { stage, q, hasPhone } = {}) {
   if (stage && stage !== 'all') query = query.eq('stage', stage);
+  if (hasPhone) query = query.neq('phone', ''); // SMS: only leads with a phone
   if (q) {
     const s = String(q).replace(/[%,()]/g, ' ').trim();
     if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%,category.ilike.%${s}%,instagram.ilike.%${s}%`);
@@ -124,9 +125,9 @@ function leadFilter(query, { stage, q } = {}) {
 
 // Server-side paginated list. Pass a finite `limit` for one page (+ exact
 // total); omit it to scan every matching row. Returns { leads, total }.
-export async function listPage(company, { stage, q, limit, offset } = {}) {
+export async function listPage(company, { stage, q, limit, offset, hasPhone } = {}) {
   const sb = getSupabase();
-  const applied = (query) => leadFilter(query, { stage, q }).order('created_at', { ascending: false });
+  const applied = (query) => leadFilter(query, { stage, q, hasPhone }).order('created_at', { ascending: false });
   if (Number.isFinite(limit)) {
     const from = offset || 0;
     const { data, error, count } = await applied(
@@ -204,6 +205,41 @@ export async function setSettings(company, patch) {
   const next = { ...s, ...patch };
   await kvSet(company, 'settings', next);
   return next;
+}
+
+// ── Daily send cap (safety valve) ────────────────────────────────────────────
+// A per-company guard so a runaway campaign can't blow past the provider's daily
+// send limit (Gmail Workspace SMTP is ~2,000/day and will hard-block beyond it).
+// ON by default. The counter lives in its own KV row and resets each calendar
+// day (America/New_York, matching the operator's day).
+export const DEFAULT_DAILY_CAP = 500;
+
+function todayKey() {
+  // Local NY date as YYYY-MM-DD, so the cap resets at the operator's midnight.
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+// The effective cap for a company (settings.dailyCap, else the safe default).
+export async function getDailyCap(company) {
+  const s = await getSettings(company);
+  const n = Number(s.dailyCap);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_DAILY_CAP;
+}
+
+// How many emails this company has sent so far TODAY (0 after the day rolls).
+export async function getSentToday(company) {
+  const d = (await kvGet(company, 'daily', null)) || {};
+  return d.date === todayKey() ? (d.count || 0) : 0;
+}
+
+// Add to today's count (used by the sender after a batch). Read-modify-write is
+// fine here: only one batch per campaign runs at a time (concurrency lock), and
+// a small cross-campaign undercount just means the cap is a hair conservative.
+export async function bumpSentToday(company, n) {
+  if (!n) return;
+  const cur = (await kvGet(company, 'daily', null)) || {};
+  const base = cur.date === todayKey() ? (cur.count || 0) : 0;
+  await kvSet(company, 'daily', { date: todayKey(), count: base + Number(n) });
 }
 
 // Pick the first non-empty value among a set of header aliases (case-insensitive;

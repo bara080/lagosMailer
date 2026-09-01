@@ -102,6 +102,48 @@ function SignatureEditor({ company }: { company: string }) {
   );
 }
 
+// Per-company daily send cap — a safety valve so a large campaign can't exceed
+// the provider's daily send limit. Shows today's usage and lets the operator
+// change the cap.
+function DailyCapCard() {
+  const { data: config } = useConfig();
+  const save = useSetSettings();
+  const [cap, setCap] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { if (config && !loaded) { setCap(String(config.dailyCap ?? 500)); setLoaded(true); } }, [config, loaded]);
+  useEffect(() => { setLoaded(false); }, [config?.company]);
+
+  const sentToday = config?.sentToday ?? 0;
+  const effCap = config?.dailyCap ?? 500;
+  const left = Math.max(0, effCap - sentToday);
+  const pct = effCap ? Math.min(100, Math.round((sentToday / effCap) * 100)) : 0;
+
+  return (
+    <div className="card pad">
+      <div className="row gap8" style={{ color: left > 0 ? 'var(--green)' : 'var(--amber)' }}>
+        <ShieldCheck size={18} /><h3 style={{ margin: 0 }}>Sending safety — daily cap</h3>
+      </div>
+      <p className="muted mt12" style={{ fontSize: 13 }}>
+        A hard limit on emails sent per day for <b>{config?.company}</b>, so a big campaign can’t blow past your provider’s daily send limit (Gmail Workspace ≈ 2,000/day). Campaigns pause at the cap and <b>auto-resume after midnight</b>.
+      </p>
+      <div className="row gap12 mt16" style={{ alignItems: 'baseline' }}>
+        <div style={{ fontSize: 28, fontWeight: 750 }}>{sentToday.toLocaleString()}</div>
+        <div className="muted">of {effCap.toLocaleString()} sent today · <b>{left.toLocaleString()}</b> left</div>
+      </div>
+      <div className="bar blue mt8"><span style={{ width: `${pct}%` }} /></div>
+      <label className="field mt16"><span>Daily cap (emails/day)</span>
+        <input className="input" type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="500" />
+      </label>
+      <div className="row gap8 mt12">
+        <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ dailyCap: Number(cap) || null })}><Save size={15} /> Save cap</button>
+        {save.isSuccess && <span className="faint" style={{ fontSize: 12 }}>Saved ✓</span>}
+        {save.isError && <span style={{ color: 'var(--red)', fontSize: 12 }}>{(save.error as any)?.message}</span>}
+      </div>
+      <p className="faint mt8" style={{ fontSize: 12 }}>Default 500/day (safety-on). Counter resets at midnight, New York time.</p>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { data: config } = useConfig();
   const ready = config?.smtpReady;
@@ -110,6 +152,8 @@ export default function SettingsPage() {
       <Topbar title="Settings" subtitle="SMTP, signature, data and account configuration" />
       <div className="page grid" style={{ gridTemplateColumns: '1fr 1fr', maxWidth: 1000 }}>
         <SignatureEditor company={config?.company || 'LagosTSQ'} />
+
+        <DailyCapCard />
 
         <div className="card pad">
           <div className="row gap8" style={{ color: ready ? 'var(--green)' : 'var(--amber)' }}>

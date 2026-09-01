@@ -112,7 +112,7 @@ export default function LeadsPage() {
                     <th style={{ width: 34 }}><input type="checkbox"
                       checked={selected.size === leads.length && leads.length > 0}
                       onChange={(e) => setSelected(e.target.checked ? new Set(leads.map((l) => l.id)) : new Set())} /></th>
-                    <th>Lead</th><th>Email</th><th>Category</th><th>Stage</th><th>Contacted</th><th>Added</th><th />
+                    <th>Lead</th><th>Email</th><th>Phone</th><th>Category</th><th>Stage</th><th>Contacted</th><th>Added</th><th />
                   </tr>
                 </thead>
                 <tbody>
@@ -126,6 +126,7 @@ export default function LeadsPage() {
                         </div>
                       </td>
                       <td onClick={() => setOpenId(l.id)} className="muted">{l.email}</td>
+                      <td onClick={() => setOpenId(l.id)} className="muted">{l.phone || '—'}</td>
                       <td onClick={() => setOpenId(l.id)}>{l.category ? <span className="chip">{l.category}</span> : '—'}</td>
                       <td onClick={() => setOpenId(l.id)}><StageBadge stage={l.stage} /></td>
                       <td onClick={() => setOpenId(l.id)} style={{ color: l.contacted_at ? 'var(--green)' : 'var(--text-faint)' }}>{l.contacted_at ? '✓' : '—'}</td>

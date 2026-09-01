@@ -18,6 +18,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const patch: Record<string, unknown> = {};
     if ('signature' in body) patch.signature = body.signature;
+    if ('dailyCap' in body) {
+      const n = Number(body.dailyCap);
+      patch.dailyCap = Number.isFinite(n) && n > 0 ? Math.floor(n) : null; // null → default
+    }
     await store.setSettings(company, patch);
     const settings = await store.getSettings(company);
     return NextResponse.json({ ok: true, settings });
