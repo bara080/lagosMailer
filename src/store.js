@@ -212,7 +212,7 @@ export async function setSettings(company, patch) {
 // send limit (Gmail Workspace SMTP is ~2,000/day and will hard-block beyond it).
 // ON by default. The counter lives in its own KV row and resets each calendar
 // day (America/New_York, matching the operator's day).
-export const DEFAULT_DAILY_CAP = 500;
+export const DEFAULT_DAILY_CAP = 1900; // headroom under Gmail Workspace's ~2,000/day limit
 
 function todayKey() {
   // Local NY date as YYYY-MM-DD, so the cap resets at the operator's midnight.

@@ -110,11 +110,11 @@ function DailyCapCard() {
   const save = useSetSettings();
   const [cap, setCap] = useState('');
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => { if (config && !loaded) { setCap(String(config.dailyCap ?? 500)); setLoaded(true); } }, [config, loaded]);
+  useEffect(() => { if (config && !loaded) { setCap(String(config.dailyCap ?? 1900)); setLoaded(true); } }, [config, loaded]);
   useEffect(() => { setLoaded(false); }, [config?.company]);
 
   const sentToday = config?.sentToday ?? 0;
-  const effCap = config?.dailyCap ?? 500;
+  const effCap = config?.dailyCap ?? 1900;
   const left = Math.max(0, effCap - sentToday);
   const pct = effCap ? Math.min(100, Math.round((sentToday / effCap) * 100)) : 0;
 
@@ -132,14 +132,14 @@ function DailyCapCard() {
       </div>
       <div className="bar blue mt8"><span style={{ width: `${pct}%` }} /></div>
       <label className="field mt16"><span>Daily cap (emails/day)</span>
-        <input className="input" type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="500" />
+        <input className="input" type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="1900" />
       </label>
       <div className="row gap8 mt12">
         <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ dailyCap: Number(cap) || null })}><Save size={15} /> Save cap</button>
         {save.isSuccess && <span className="faint" style={{ fontSize: 12 }}>Saved ✓</span>}
         {save.isError && <span style={{ color: 'var(--red)', fontSize: 12 }}>{(save.error as any)?.message}</span>}
       </div>
-      <p className="faint mt8" style={{ fontSize: 12 }}>Default 500/day (safety-on). Counter resets at midnight, New York time.</p>
+      <p className="faint mt8" style={{ fontSize: 12 }}>Default 1,900/day (headroom under Gmail Workspace’s ~2,000 limit). Counter resets at midnight, New York time.</p>
     </div>
   );
 }

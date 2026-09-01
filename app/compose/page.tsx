@@ -267,7 +267,7 @@ function ComposeInner() {
 
   // Daily send cap (safety). Sends beyond today's allowance auto-continue the
   // next day via the cron, so we inform rather than block.
-  const dailyCap = config?.dailyCap ?? 500;
+  const dailyCap = config?.dailyCap ?? 1900;
   const sentToday = config?.sentToday ?? 0;
   const capLeftToday = Math.max(0, dailyCap - sentToday);
   const exceedsToday = recipientCount > capLeftToday;
