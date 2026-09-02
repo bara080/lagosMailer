@@ -94,6 +94,7 @@ export interface Config { smtpReady: boolean; from: string; senders: string[]; e
 
 // ── Campaign job engine (relational; see src/engine.js) ──────────────────────
 export interface EngineCampaign { id: string; company: string; name: string; status: string; current_version_id: string | null; created_at: string; updated_at: string; }
+export interface Template { id: number; name: string; subject: string; body: string; created_at?: string; }
 export interface EngineRun {
   id: string; campaign_id: string; campaign_version_id: string; status: string;
   audience_mode: string; audience_filter: any; duplicate_policy: string; source_run_id: string | null;
@@ -206,6 +207,12 @@ export const api = {
     req<{ ok: boolean; status: string }>(`/api/engine/runs/${runId}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
   deleteRun: (runId: string) => req<{ ok: boolean }>(`/api/engine/runs/${runId}`, { method: 'DELETE' }),
   deleteEngineCampaign: (campaignId: string) => req<{ ok: boolean }>(`/api/engine/campaigns/${campaignId}`, { method: 'DELETE' }),
+
+  // ── Templates (per-company reusable copy) ──────────────────────────────────
+  templates: () => req<{ templates: Template[] }>('/api/templates'),
+  createTemplate: (body: { name: string; subject: string; body: string }) => req<Template>('/api/templates', { method: 'POST', body: JSON.stringify(body) }),
+  updateTemplate: (id: number, body: Partial<Template>) => req<Template>(`/api/templates/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteTemplate: (id: number) => req<{ ok: boolean }>(`/api/templates/${id}`, { method: 'DELETE' }),
   testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
   listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),

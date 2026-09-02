@@ -691,6 +691,61 @@ export async function removeCampaign(company, id) {
   return { ok: true };
 }
 
+// ── Email templates (reusable copy, per company) ─────────────────────────────
+// Stored in KV per company so Native125th and LagosTSQ keep separate sets.
+// Bodies use the friendly merge tokens ([First name] etc.) Compose understands.
+const RESERVE_URL = 'https://www.opentable.com/r/native-harlem-new-york';
+const NATIVE_ADDR = '2319 Frederick Douglass Blvd, Harlem';
+const NATIVE_TEMPLATES = [
+  { name: 'Open Mic Night', subject: "You're Invited to Open Mic Night at Native Harlem! 🎤",
+    body: `Hi [First name],\n\nThis Wednesday, we're turning up the vibes at Native Harlem! 🎶\n\nJoin us for Open Mic Night at 8 PM — a special live performance plus handcrafted cocktails all night. Happy Hour runs until 9 PM with drinks & bites to keep the energy going.\n\n📍 ${NATIVE_ADDR}\n🕗 Open Mic starts at 8 PM\n\nPull up, grab a drink, and catch a vibe!\n\n[Reserve on OpenTable](${RESERVE_URL})` },
+  { name: 'Afrobeats Brunch', subject: 'Afrobeats Brunch is back at Native Harlem 🍹',
+    body: `Hi [First name],\n\nYour weekend just got better. 🌍\n\nJoin us Saturday & Sunday for Afrobeats Brunch at Native Harlem — bold, modern Nigerian plates, handcrafted cocktails, and the best afrobeats in the city.\n\n📍 ${NATIVE_ADDR}\n🕚 Brunch served 11 AM – 4 PM\n\nBring the crew and let's turn up.\n\n[Book your table](${RESERVE_URL})` },
+  { name: 'Private Events & Catering', subject: 'Host your next celebration at Native Harlem 🎉',
+    body: `Hi [First name],\n\nBirthday, corporate dinner, or a night out with friends — Native Harlem sets the scene.\n\nWe host private events and celebrations with bold modern Nigerian cuisine, handcrafted cocktails, and live entertainment in the heart of Harlem. Full catering available too.\n\n📍 ${NATIVE_ADDR}\n\nTell us what you're planning and we'll make it unforgettable.\n\n[Reserve now](${RESERVE_URL})` },
+];
+const GENERIC_TEMPLATES = [
+  { name: 'Cold intro', subject: 'Quick question about [Business]', body: 'Hi [First name], I came across [Business] and think we can help. Would you be open to a quick chat?' },
+  { name: 'Follow-up', subject: 'Following up — [Business]', body: 'Hi [First name], just circling back on my note about [Business]. Any thoughts?' },
+  { name: 'Free trial offer', subject: 'A free 60-day trial for [Business]', body: 'Hi [First name], we\'re offering new [Category] businesses a free 60-day trial. Interested?' },
+];
+// Company-appropriate starter set, seeded on first access so defaults are editable.
+function defaultTemplates(company) {
+  return (company === 'Native125th' ? NATIVE_TEMPLATES : GENERIC_TEMPLATES)
+    .map((t, i) => ({ id: i + 1, ...t, created_at: new Date().toISOString() }));
+}
+
+export async function listTemplates(company) {
+  const existing = await kvGet(company, 'templates', null);
+  if (existing !== null) return existing;
+  const seeded = defaultTemplates(company);
+  await kvSet(company, 'templates', seeded); // persist so rows can be edited/deleted
+  return seeded;
+}
+
+export async function addTemplate(company, data) {
+  const ts = await listTemplates(company);
+  const id = ts.reduce((m, t) => Math.max(m, t.id || 0), 0) + 1;
+  const rec = { id, name: data.name || 'Untitled template', subject: data.subject || '', body: data.body || '', created_at: new Date().toISOString() };
+  await kvSet(company, 'templates', [...ts, rec]);
+  return rec;
+}
+
+export async function updateTemplate(company, id, patch) {
+  const ts = await listTemplates(company);
+  const i = ts.findIndex((t) => t.id === Number(id));
+  if (i === -1) throw new Error(`template ${id} not found`);
+  ts[i] = { ...ts[i], ...patch, id: ts[i].id };
+  await kvSet(company, 'templates', ts);
+  return ts[i];
+}
+
+export async function removeTemplate(company, id) {
+  const ts = await listTemplates(company);
+  await kvSet(company, 'templates', ts.filter((t) => t.id !== Number(id)));
+  return { ok: true };
+}
+
 export async function campaignCounts(company) {
   const cs = await listCampaigns(company);
   return {

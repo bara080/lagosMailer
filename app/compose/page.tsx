@@ -5,6 +5,7 @@ import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperc
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets, useCreateEngineCampaign, useCreateRun } from '@/lib/hooks';
+import { plainToHtml } from '@/lib/markdown';
 import type { Lead, Attachment, Asset } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
@@ -60,21 +61,16 @@ function htmlToPlain(html: string) {
     .trim();
 }
 
-const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-// Turn a plain-text message (blank line = new paragraph, single newline = line
-// break) into safe HTML. User text is escaped; the `{{…}}` tokens pass through.
-// Links: `[label](url)` → a named link (clean anchor text); a bare http(s) URL
-// also becomes clickable. Guarded so we never double-wrap.
-const LINK = 'color:#2563eb;text-decoration:underline';
-function plainToHtml(text: string) {
-  let body = escapeHtml((text || '').trim())
-    // named links: [Reserve on OpenTable](https://…)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" style="${LINK}">$1</a>`);
-  // bare URLs not already inside a tag (not preceded by " ' or >)
-  body = body.replace(/(^|[^"'>])(https?:\/\/[^\s<]+[^\s<.,;:)\]}"'])/g, `$1<a href="$2" style="${LINK}">$2</a>`);
-  return body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('\n');
-}
+// plainToHtml now lives in the shared lib/markdown module (reused by Templates).
+// LEGACY local copy kept (commented) for rollback:
+// const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// const LINK = 'color:#2563eb;text-decoration:underline';
+// function plainToHtml(text: string) {
+//   let body = escapeHtml((text || '').trim())
+//     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" style="${LINK}">$1</a>`);
+//   body = body.replace(/(^|[^"'>])(https?:\/\/[^\s<]+[^\s<.,;:)\]}"'])/g, `$1<a href="$2" style="${LINK}">$2</a>`);
+//   return body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('\n');
+// }
 
 // A friendly "click to add" row. Inserts a readable token at the caret of the
 // field the user last had focused, so it drops in exactly where they're typing.

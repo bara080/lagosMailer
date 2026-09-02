@@ -301,3 +301,33 @@ export function useSendSms() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
   });
 }
+
+// ── Templates (per-company). Company switch calls qc.invalidateQueries() globally,
+// so the ['templates'] key refetches automatically when the company changes.
+export function useTemplates() {
+  return useQuery({ queryKey: ['templates'], queryFn: api.templates, staleTime: 30_000 });
+}
+
+export function useCreateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createTemplate,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['templates'] }),
+  });
+}
+
+export function useUpdateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<import('./api').Template> }) => api.updateTemplate(id, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['templates'] }),
+  });
+}
+
+export function useDeleteTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteTemplate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['templates'] }),
+  });
+}
