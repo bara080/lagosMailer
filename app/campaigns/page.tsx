@@ -31,6 +31,9 @@ export default function CampaignsPage() {
   const del = useDeleteCampaign();
   const confirm = useConfirm();
   const [menu, setMenu] = useState<number | null>(null);
+  // Anchor the ⋮ dropdown with fixed positioning so it escapes the table's
+  // overflow clipping, and open it upward when the row is near the viewport bottom.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; up: boolean } | null>(null);
   const [viewing, setViewing] = useState<Campaign | null>(null); // view campaign content (sent or draft)
   const fillSample = (s: string) => (s || '')
     .replace(/\{\{name\}\}/g, 'there').replace(/\{\{business\}\}/g, 'your business')
@@ -69,10 +72,12 @@ export default function CampaignsPage() {
           <div className="tabs" style={{ padding: '0 6px' }}>
             {TABS.map((t) => <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          {/* Contained scroll: rows scroll within a bounded area; the header stays sticky.
+              The ⋮ menu is position:fixed, so this overflow never clips it. */}
+          <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 340px)' }}>
             {isLoading ? <TableSkeleton rows={5} cols={8} /> :
               campaigns.length === 0 ? <EmptyState title="No campaigns" hint="Click “New Campaign” to compose and send one." /> : (
-              <table className="tbl">
+              <table className="tbl sticky-head">
                 <thead><tr><th>Campaign</th><th>Status</th><th>Audience</th><th>Sent</th><th>Delivered</th><th>Replies</th><th>Bounces</th><th>Created</th><th /></tr></thead>
                 <tbody>
                   {campaigns.map((c) => (
@@ -119,11 +124,17 @@ export default function CampaignsPage() {
                             })()
                           )}
                           <div className="usermenu">
-                            <button className="btn ghost sm" title="More" onClick={() => setMenu(menu === c.id ? null : c.id)}><MoreVertical size={14} /></button>
-                            {menu === c.id && (
+                            <button className="btn ghost sm" title="More" onClick={(e) => {
+                              if (menu === c.id) { setMenu(null); return; }
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              const up = r.bottom > window.innerHeight - 240; // near bottom → flip upward
+                              setMenuPos({ top: up ? r.top : r.bottom + 4, right: window.innerWidth - r.right, up });
+                              setMenu(c.id);
+                            }}><MoreVertical size={14} /></button>
+                            {menu === c.id && menuPos && (
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setMenu(null)} />
-                                <div className="menu-pop" style={{ right: 0, left: 'auto' }}>
+                                <div className="menu-pop" style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, left: 'auto', transform: menuPos.up ? 'translateY(-100%)' : 'none', zIndex: 31 }}>
                                   <button className="mi" onClick={() => { router.push(`/compose?from=${c.id}`); setMenu(null); }}>
                                     {c.status === 'draft' ? <><FileEdit size={15} /> Edit in Compose</> : <><Copy size={15} /> Duplicate & edit</>}
                                   </button>
