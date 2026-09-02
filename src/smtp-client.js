@@ -19,10 +19,18 @@ import tls from 'node:tls';
 
 function makeReader(sock) {
   let buf = '';
-  /** @type {((r: Reply) => void)[]} */
+  /** @type {{ resolve: (r: Reply) => void, reject: (e: Error) => void }[]} */
   const pending = [];
   /** @type {Reply[]} */
   const ready = [];
+  let failed = null; // terminal error once the socket dies — all reads reject
+  // Reject every waiting read (and future ones). Called when the connection
+  // errors, closes, or goes idle past the socket timeout — so a throttled server
+  // that stalls mid-conversation surfaces as a fast failure instead of a hang.
+  const fail = (err) => {
+    failed = err;
+    while (pending.length) pending.shift().reject(err);
+  };
   const pump = () => {
     // One complete SMTP reply = zero+ continuation lines (\d{3}-...) then a final
     // line (\d{3}<space>...), each CRLF-terminated.
@@ -34,20 +42,21 @@ function makeReader(sock) {
       const code = parseInt(raw.match(/(\d{3}) [^\r\n]*\r?\n$/)?.[1] ?? '0', 10);
       const reply = { code, raw };
       const next = pending.shift();
-      if (next) next(reply);
+      if (next) next.resolve(reply);
       else ready.push(reply);
     }
   };
-  sock.on('data', (d) => {
-    buf += d.toString('utf8');
-    pump();
-  });
+  sock.on('data', (d) => { buf += d.toString('utf8'); pump(); });
+  sock.on('error', (e) => fail(e instanceof Error ? e : new Error('SMTP socket error')));
+  sock.on('close', () => fail(new Error('SMTP connection closed')));
+  sock.on('timeout', () => { try { sock.destroy(); } catch { /* noop */ } fail(new Error('SMTP timeout (server stalled)')); });
   return {
     /** @returns {Promise<Reply>} */
     read() {
+      if (failed) return Promise.reject(failed);
       const r = ready.shift();
       if (r) return Promise.resolve(r);
-      return new Promise((resolve) => pending.push(resolve));
+      return new Promise((resolve, reject) => pending.push({ resolve, reject }));
     },
   };
 }
@@ -91,6 +100,9 @@ export class SmtpClient {
         upgraded.once('secureConnect', () => resolve());
         upgraded.once('error', reject);
       });
+      upgraded.setTimeout(30000); // arm idle-timeout on the upgraded socket too —
+      // the actual send conversation runs here on STARTTLS (587), so without this a
+      // stalled/throttled server would hang the read forever.
       c.sock = upgraded;
       c.reader = makeReader(upgraded);
       await c.cmd(`EHLO ${ehlo}`, [250]);
