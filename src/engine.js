@@ -438,6 +438,20 @@ export async function drainChunk(company, runId) {
     return { stopped: true };
   }
 
+  // Self-heal claim recovery: any recipients still 'sending' at the top of a chunk
+  // are orphans from a PREVIOUSLY interrupted drain (a chunk sends single-driver, so
+  // nothing is legitimately mid-flight here). Left alone they stay stuck forever AND
+  // hold reserved quota, which stalls the run and can falsely trip the daily cap.
+  // Reset them to 'pending' (nothing was sent — they have no provider_message_id) and
+  // resync the quota bucket to reality so leaked reservations can't block sending.
+  const { data: orphans } = await sb.from('campaign_recipients').select('id')
+    .eq('company', company).eq('run_id', runId).eq('status', 'sending').is('provider_message_id', null);
+  if (orphans && orphans.length) {
+    await sb.from('campaign_recipients').update({ status: 'pending', claim_token: null, claim_expires_at: null }).in('id', orphans.map((o) => o.id));
+    await reconcileQuota(company);
+    await logEvent(company, runId, 'claims.reclaimed', { count: orphans.length });
+  }
+
   // Cadence gating: only the CURRENT stage sends. When it drains, advance to the
   // next stage (or finish). Stage size is enforced by the recipients' assigned
   // stage_number, so claiming at the current stage naturally caps the batch.
