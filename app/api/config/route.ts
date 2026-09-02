@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as store from '@/src/store.js';
-import { smtpConfig, telnyxConfig, mailerConfig } from '@/lib/send.js';
+import { smtpConfig, telnyxConfig, mailerConfig, renderSignatureHtml } from '@/lib/send.js';
 import { resendConfig } from '@/lib/resend.js';
 import { sheetConfig } from '@/lib/gsheets.js';
+import { unsubFooterHtml } from '@/lib/unsubscribe.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
     sheetReady: sheet.ready, sheetHasCreds: sheet.hasCreds, sheetUrl: sheet.sheetUrl,
     company, stages: store.STAGES,
     signature: settings.signature || null,
+    // Server-rendered preview extras (same renderers the engine uses at send time),
+    // so read-only previews can show exactly what recipients get. Sample recipient
+    // for the unsubscribe token — purely cosmetic in a preview.
+    signaturePreviewHtml: renderSignatureHtml(settings.signature, { name: '', business: '', category: '', email: '' }),
+    unsubFooterPreviewHtml: unsubFooterHtml(company, 'preview@example.com'),
     dailyCap: await store.getDailyCap(company),
     sentToday: await store.getSentToday(company),
   });

@@ -306,7 +306,11 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
   // campaigns keep it frozen in the version, so we show a pointer instead.
   const previewFrom = source === 'fresh' ? (fresh.senderKey || '—') : (config?.from || '—');
   const previewSubject = source === 'fresh' ? fresh.subject : '';
-  const previewBodyHtml = source === 'fresh' ? toHtml(fresh.message) : '';
+  // Show the same signature + unsubscribe footer the engine appends at send time,
+  // so the review preview is WYSIWYG (server-rendered via config, no client dupes).
+  const previewBodyHtml = source === 'fresh'
+    ? toHtml(fresh.message) + (config?.signaturePreviewHtml || '') + (config?.unsubFooterPreviewHtml || '')
+    : '';
 
   async function launch() {
     let cid = campaignId;

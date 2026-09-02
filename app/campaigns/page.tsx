@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy, Rocket, Trash2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useCampaigns, useSendCampaign, useControlCampaign, useImportCampaign, useDeleteCampaign } from '@/lib/hooks';
+import { useCampaigns, useSendCampaign, useControlCampaign, useImportCampaign, useDeleteCampaign, useConfig } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import type { Campaign } from '@/lib/api';
 
@@ -24,6 +24,7 @@ export default function CampaignsPage() {
   const router = useRouter();
   const [tab, setTab] = useState('all');
   const { data, isLoading } = useCampaigns();
+  const { data: config } = useConfig(); // for WYSIWYG signature + unsubscribe in the preview
   const send = useSendCampaign();
   const control = useControlCampaign();
   const importCampaign = useImportCampaign();
@@ -167,7 +168,8 @@ export default function CampaignsPage() {
                 From: <b>{viewing.fromName || 'Team'}</b>{viewing.fromAddress ? ` <${viewing.fromAddress}>` : ''} · To: <b>{(viewing.recipients ?? 0).toLocaleString()}</b> recipient(s)
               </div>
               <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>{fillSample(viewing.subject) || '(no subject)'}</div>
-              <div style={{ lineHeight: 1.55, fontSize: 14 }} dangerouslySetInnerHTML={{ __html: fillSample(viewing.html) || '<i style="color:#999">No content</i>' }} />
+              {/* Body + the signature & unsubscribe footer the engine appends at send time (WYSIWYG). */}
+              <div style={{ lineHeight: 1.55, fontSize: 14 }} dangerouslySetInnerHTML={{ __html: (fillSample(viewing.html) || '<i style="color:#999">No content</i>') + (config?.signaturePreviewHtml || '') + (config?.unsubFooterPreviewHtml || '') }} />
               {viewing.attachments && viewing.attachments.length > 0 && (
                 <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #eee', fontSize: 12, color: '#6b7280' }}>
                   <Paperclip size={12} /> {viewing.attachments.length} attachment(s): {viewing.attachments.map((a) => a.name).join(', ')}

@@ -90,7 +90,7 @@ export interface Signature {
   socials: { instagram?: string; tiktok?: string; facebook?: string; x?: string };
 }
 
-export interface Config { smtpReady: boolean; from: string; senders: string[]; emailProvider: 'smtp' | 'resend'; mailReady: boolean; resendReady: boolean; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; dailyCap: number; sentToday: number; }
+export interface Config { smtpReady: boolean; from: string; senders: string[]; emailProvider: 'smtp' | 'resend'; mailReady: boolean; resendReady: boolean; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; signaturePreviewHtml: string; unsubFooterPreviewHtml: string; dailyCap: number; sentToday: number; }
 
 // ── Campaign job engine (relational; see src/engine.js) ──────────────────────
 export interface EngineCampaign { id: string; company: string; name: string; status: string; current_version_id: string | null; created_at: string; updated_at: string; }
