@@ -215,6 +215,20 @@ function ComposeInner() {
   // Prefill from an existing campaign (?from=<id>). A draft edits IN PLACE; any
   // other status loads as a reusable copy. Runs once when the campaign arrives.
   const prefilled = useRef(false);
+  // Template prefill: /compose?template=1 pulls the picked Template's copy from
+  // sessionStorage (set by the Templates page) into the composer, then clears it.
+  const tplLoaded = useRef(false);
+  useEffect(() => {
+    if (tplLoaded.current || sp.get('template') !== '1') return;
+    tplLoaded.current = true;
+    try {
+      const raw = sessionStorage.getItem('composeTemplate');
+      if (!raw) return;
+      const t = JSON.parse(raw);
+      setForm((f) => ({ ...f, name: t.name || f.name, subject: t.subject || f.subject, message: t.message || f.message }));
+      sessionStorage.removeItem('composeTemplate');
+    } catch {}
+  }, [sp]);
   const isEditDraft = !!fromId && fromCampaign?.status === 'draft';
   useEffect(() => {
     if (!fromCampaign || prefilled.current) return;

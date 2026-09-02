@@ -302,6 +302,11 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
   const days = estimate > 0 ? Math.max(1, Math.ceil(estimate / dailyCap)) : 0;
   const providerLabel = (source === 'fresh' ? fresh.provider : config?.emailProvider) === 'resend' ? 'Resend' : 'Gmail';
   const campaignName = source === 'fresh' ? `${fresh.name} · new` : (campaigns.find((c) => c.id === campaignId)?.name || '—');
+  // Review-step email preview. Fresh runs carry their content in state; existing
+  // campaigns keep it frozen in the version, so we show a pointer instead.
+  const previewFrom = source === 'fresh' ? (fresh.senderKey || '—') : (config?.from || '—');
+  const previewSubject = source === 'fresh' ? fresh.subject : '';
+  const previewBodyHtml = source === 'fresh' ? toHtml(fresh.message) : '';
 
   async function launch() {
     let cid = campaignId;
@@ -443,6 +448,20 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
                     <span className="faint" style={{ fontSize: 13 }}>{k}</span><b style={{ fontSize: 13 }}>{v}</b>
                   </div>
                 ))}
+              </div>
+              {/* Rendered email preview so the sender is reviewed before launch. */}
+              <div className="card mt12" style={{ padding: 0, overflow: 'hidden' }}>
+                <div className="row between" style={{ padding: '9px 14px', borderBottom: '1px solid var(--border)' }}>
+                  <span className="faint" style={{ fontSize: 12 }}>Preview · From <b>{previewFrom}</b> via {providerLabel}</span>
+                </div>
+                <div style={{ background: '#fff', color: '#111', padding: '16px 18px', maxHeight: 260, overflowY: 'auto' }}>
+                  {previewBodyHtml ? (<>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{previewSubject || <span style={{ color: '#999', fontWeight: 400 }}>(no subject)</span>}</div>
+                    <div style={{ lineHeight: 1.55, fontSize: 14, wordBreak: 'break-word' }} dangerouslySetInnerHTML={{ __html: previewBodyHtml }} />
+                  </>) : (
+                    <div style={{ color: '#999', fontSize: 13 }}>This run sends a saved campaign — its frozen content will be used. Open it in Compose to preview.</div>
+                  )}
+                </div>
               </div>
               <label className="row gap8 mt12" style={{ fontSize: 13, cursor: 'pointer' }}>
                 <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />
