@@ -83,6 +83,19 @@ export async function createRun(company, r = {}) {
   return data;
 }
 
+// Idempotency guard: find an already in-flight run matching this launch signature,
+// so a double-click (or a timed-out request that got retried) reuses it instead of
+// spawning a duplicate. Used for retries — same campaign + failed_only + source run.
+const ACTIVE_RUN_STATUSES = ['preparing', 'queued', 'running', 'sending', 'paused', 'gated', 'stopping'];
+export async function findActiveRun(company, { campaignId, audienceMode, sourceRunId }) {
+  const sb = getSupabase();
+  let q = sb.from('campaign_runs').select('*').eq('company', company)
+    .eq('campaign_id', campaignId).eq('audience_mode', audienceMode).in('status', ACTIVE_RUN_STATUSES);
+  q = sourceRunId ? q.eq('source_run_id', sourceRunId) : q.is('source_run_id', null);
+  const { data } = await q.order('created_at', { ascending: false }).limit(1).maybeSingle();
+  return data || null;
+}
+
 // List a company's campaigns (newest first).
 export async function listCampaigns(company) {
   const sb = getSupabase();

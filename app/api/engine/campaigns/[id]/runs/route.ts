@@ -25,6 +25,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     const b = await req.json().catch(() => ({}));
 
+    // Retry idempotency: if a retry for these same failures is already in flight,
+    // reuse it instead of spawning a duplicate (guards double-clicks + timed-out
+    // requests that get retried). Only for failed_only retries — launching several
+    // normal batches of one campaign is a legitimate, intended action.
+    if (b.audienceMode === 'failed_only' && b.sourceRunId) {
+      const existing = await engine.findActiveRun(company, { campaignId: id, audienceMode: 'failed_only', sourceRunId: b.sourceRunId });
+      if (existing) return NextResponse.json({ run: existing, snapshot: null, first: null, workflowStarted: false, idempotent: true });
+    }
+
     // Default to the campaign's current (latest) frozen version.
     const versionId = b.versionId || (await engine.getCampaign(company, id))?.current_version_id;
     if (!versionId) return NextResponse.json({ error: 'campaign has no version' }, { status: 400 });

@@ -76,6 +76,13 @@ function RunsInner() {
   const runPageCount = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
   const pagedRuns = runs.slice((runPage - 1) * RUNS_PER_PAGE, runPage * RUNS_PER_PAGE);
 
+  // Campaign sidebar pagination — the list grows unbounded as batches accumulate.
+  const CAMPAIGNS_PER_PAGE = 8;
+  const [campPage, setCampPage] = useState(1);
+  const campPageCount = Math.max(1, Math.ceil(campaigns.length / CAMPAIGNS_PER_PAGE));
+  useEffect(() => { if (campPage > campPageCount) setCampPage(campPageCount); }, [campPageCount, campPage]); // clamp after deletes
+  const pagedCampaigns = campaigns.slice((campPage - 1) * CAMPAIGNS_PER_PAGE, campPage * CAMPAIGNS_PER_PAGE);
+
   // Bridge: /runs?launch=<engineCampaignId> (from "Launch as run" on Compose)
   // opens the wizard on the Audience step with that campaign pre-selected.
   useEffect(() => {
@@ -117,7 +124,7 @@ function RunsInner() {
           <div className="stack gap6 mt12">
             {isLoading ? <span className="faint">Loading…</span> :
               campaigns.length === 0 ? <p className="faint" style={{ fontSize: 13 }}>No campaigns yet — create one to launch runs.</p> :
-              campaigns.map((c) => (
+              pagedCampaigns.map((c) => (
                 <button key={c.id} className={`pick-card ${activeCampaign === c.id ? 'sel' : ''}`} style={{ padding: '10px 12px' }} onClick={() => { setSelected(c.id); setOpenRun(null); }}>
                   <span className="pick-ic" style={{ width: 30, height: 30 }}><Layers size={14} /></span>
                   {/* Name + short id tag — distinguishes same-named copies (e.g. two "… (copy)"). */}
@@ -129,6 +136,13 @@ function RunsInner() {
                 </button>
               ))}
           </div>
+          {campaigns.length > CAMPAIGNS_PER_PAGE && (
+            <div className="row between mt12" style={{ alignItems: 'center' }}>
+              <button className="btn ghost sm" disabled={campPage <= 1} onClick={() => setCampPage(campPage - 1)}>← Prev</button>
+              <span className="faint" style={{ fontSize: 12 }}>Page {campPage} / {campPageCount}</span>
+              <button className="btn ghost sm" disabled={campPage >= campPageCount} onClick={() => setCampPage(campPage + 1)}>Next →</button>
+            </div>
+          )}
         </div>
 
         {/* Runs of the selected campaign */}
