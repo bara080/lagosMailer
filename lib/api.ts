@@ -185,7 +185,7 @@ export const api = {
     req<{ campaign: EngineCampaign; version: any }>('/api/engine/campaigns', { method: 'POST', body: JSON.stringify(body) }),
   engineRuns: (campaignId: string) => req<{ runs: EngineRun[] }>(`/api/engine/campaigns/${campaignId}/runs`),
   createRun: (campaignId: string, body: NewRunBody) =>
-    req<{ run: EngineRun; snapshot: { count: number }; workflowStarted: boolean }>(`/api/engine/campaigns/${campaignId}/runs`, { method: 'POST', body: JSON.stringify(body) }),
+    req<{ run: EngineRun; snapshot: { count: number }; first?: { sentNow?: number; done?: boolean } | null; workflowStarted: boolean }>(`/api/engine/campaigns/${campaignId}/runs`, { method: 'POST', body: JSON.stringify(body) }),
   runDetail: (runId: string) => req<{ run: EngineRun; progress: RunProgress; events: EngineEvent[]; stages: RunStage[] }>(`/api/engine/runs/${runId}`),
   runRecipients: (runId: string, params: { page?: number; limit?: number; status?: string } = {}) => {
     const s = new URLSearchParams();

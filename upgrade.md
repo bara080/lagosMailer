@@ -89,13 +89,29 @@ Campaign runs are durable rows; dedup + atomic quota are real. All tested E2E.
 - [x] Atomic shared quota (`reserve_quota` locks the bucket) — concurrent runs already can't exceed the cap.
 - [ ] Weighted round-robin fair scheduler (only matters meaningfully past 1,900/day).
 
-### Phase 5 — cutover (PENDING)
-- [ ] **Compose → engine convergence** (one send path); make relational tables authoritative; comment out
-      (don't delete) the legacy KV campaign/queue path + every-minute cron once proven.
+### ✅ Phase 5 — Compose convergence (DONE 2026-09-02; final cutover PENDING)
+- [x] **Bridge: "Launch as run"** — Campaigns ⋮ menu clones a legacy Compose/KV campaign into an engine
+      campaign+version (`/api/engine/import-campaign`), then `/runs?launch=<id>` opens the wizard on the
+      Audience step. Content maps cleanly (`{{…}}` tokens, sender, reply-to, attachments). Verified.
+- [x] **Full convergence — Compose Send → engine run.** `app/compose/page.tsx` `finalize()` now creates an
+      engine campaign+version (`useCreateEngineCampaign`) + launches a run (`useCreateRun`) instead of the KV
+      campaign + `sendCampaignBatch`. Audience maps: custom→`explicit`, else→`segment`, with the whole Compose
+      filter (stage/ids/emails/limit/skipEmailed) → `audience_filter` (resolved by `resolveAudience`). Sender =
+      `fromName <fromAddress>`, provider = `config.emailProvider`, attachments → `attachment_manifest`.
+      Legacy KV path **commented out (not deleted)** for rollback; "Preview (dry run)" removed (engine has none);
+      result shows **"View run →"** → `/runs?run=<id>` opens the monitor. Verified E2E (segment→3 real leads,
+      sender mapping). Both entry points (Compose native + Campaigns "Launch as run" bridge) land on the engine.
+- [ ] **Final cutover:** once the engine is proven in prod, comment out (don't delete) the legacy KV campaign
+      create + `sendCampaignBatch`/`sendCampaign` + KV `daily` cap + the every-minute cron; the `/campaigns` KV
+      page becomes read-only history (existing KV campaigns still viewable / "Launch as run"-able).
+- [ ] **Deploy gate:** ALL of the above is uncommitted local code — Vercel still runs the old build. Needs
+      commit+push+deploy + Vercel env (`RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, per-company `EMAIL_PROVIDER=resend`).
+      Engine tables/RPCs are already live in Supabase (applied via MCP), so only app code needs deploying.
 
 ---
 
 ## Status
 Engine spec is built end-to-end (relational ledger → concurrency-safe quota → cadence → gates → wizard →
-monitor → delivery webhooks + suppression), all verified via node/MCP + `next build`. Remaining: activate
-webhooks in prod (env + deploy), Compose→engine convergence, and the fair scheduler.
+monitor → delivery webhooks + suppression → **Compose convergence**), all verified via node/MCP + `next build`.
+Compose's Send AND the Campaigns "Launch as run" bridge both launch engine runs. Remaining: **deploy** (commit
++ push + Vercel env), the final KV-path cutover comment-out, stage HEALTH-gates, and the fair scheduler.

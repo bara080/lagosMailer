@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText, Images } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
-import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets } from '@/lib/hooks';
+import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets, useCreateEngineCampaign, useCreateRun } from '@/lib/hooks';
 import type { Lead, Attachment, Asset } from '@/lib/api';
 
 // Personalization is shown to non-developers as READABLE tokens like
@@ -131,9 +131,14 @@ function ComposeInner() {
   }
 
   const { data: config } = useConfig();
+  // LEGACY (KV campaign + sendCampaignBatch) — superseded by the engine hooks
+  // below; kept for rollback. Still used by the ?from prefill loader.
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
   const send = useSendCampaign();
+  // Converged: Compose now launches a durable ENGINE run.
+  const createEngineCampaign = useCreateEngineCampaign();
+  const createRun = useCreateRun();
   const test = useTestSend();
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
@@ -290,27 +295,30 @@ function ComposeInner() {
     if (ok) finalize(false);
   }
 
-  async function finalize(dryRun: boolean) {
+  async function finalize(_dryRun?: boolean) {
     setResult(null);
-    const payload = {
+    // LEGACY (KV campaign + sendCampaignBatch) — replaced by the engine launch
+    // below; kept for rollback:
+    // const payload = { name: form.name, subject: toBackend(form.subject), html: plainToHtml(toBackend(form.message)), text: toBackend(form.message), fromName: form.fromName, fromAddress: effectiveFrom, replyTo: form.replyTo, audience, status: 'draft', attachments };
+    // const camp = isEditDraft ? await update.mutateAsync({ id: fromId as number, body: payload as any }) : await create.mutateAsync(payload as any);
+    // const out: any = await send.mutateAsync({ id: camp.id, dryRun });
+
+    // Converged: create an ENGINE campaign+version and launch a durable run
+    // (relational, atomic quota, cadence-capable, fully monitored on /runs).
+    const fromLine = form.fromName ? `${form.fromName} <${effectiveFrom}>` : effectiveFrom;
+    const camp = await createEngineCampaign.mutateAsync({
       name: form.name,
       subject: toBackend(form.subject),
       html: plainToHtml(toBackend(form.message)),
       text: toBackend(form.message),
-      fromName: form.fromName, fromAddress: effectiveFrom, replyTo: form.replyTo, audience, status: 'draft',
+      senderKey: fromLine,
+      providerKey: config?.emailProvider,
+      replyTo: form.replyTo,
       attachments,
-    };
-    // Editing an existing draft updates it in place; otherwise create a new one.
-    const camp = isEditDraft
-      ? await update.mutateAsync({ id: fromId as number, body: payload as any })
-      : await create.mutateAsync(payload as any);
-    // Kick the first batch; real sends then finish in the background via the cron.
-    const out: any = await send.mutateAsync({ id: camp.id, dryRun });
-    if (dryRun) {
-      setResult({ ...out, name: form.name });
-    } else {
-      setResult({ started: true, name: form.name, total: out.total ?? recipientCount, sentNow: out.sentNow ?? 0, done: out.done });
-    }
+    });
+    const audienceMode = mode === 'custom' ? 'explicit' : 'segment';
+    const res = await createRun.mutateAsync({ campaignId: camp.campaign.id, body: { audienceMode, audienceFilter: audience, dispatchChunkSize: 50 } });
+    setResult({ started: true, name: form.name, total: res.snapshot?.count ?? recipientCount, sentNow: res.first?.sentNow ?? 0, done: res.first?.done, runId: res.run.id });
   }
 
   return (
@@ -320,7 +328,7 @@ function ComposeInner() {
           <button className="btn ghost" onClick={() => router.push('/campaigns')}>Save Draft</button>
           {step > 1 && <button className="btn ghost" onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>}
           {step < 3 ? <button className="btn" onClick={() => setStep(step + 1)}>Next →</button>
-            : <button className="btn" disabled={send.isPending || create.isPending} onClick={askAndSend}><Send size={15} /> Send campaign</button>}
+            : <button className="btn" disabled={createEngineCampaign.isPending || createRun.isPending} onClick={askAndSend}><Send size={15} /> Send campaign</button>}
         </>} />
       <div className="page">
         {/* Steps */}
@@ -561,25 +569,14 @@ function ComposeInner() {
               </div>
               {result && (
                 <div className="card pad">
-                  <h3 style={{ marginTop: 0 }}>{result.dryRun ? 'Preview (dry run)' : result.started ? 'Sending started' : 'Result'}</h3>
-                  {result.dryRun ? (
-                    <>
-                      <p>DRY RUN — {result.total} recipient(s), nothing sent.</p>
-                      <div className="stack gap6" style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {(result.results || []).slice(0, 12).map((r: any, i: number) => <div key={i} className="faint">{r.status.padEnd(9)} {r.email}{r.error ? ' — ' + r.error : ''}</div>)}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p style={{ color: 'var(--green)' }}>✓ Sending to <b>{result.total?.toLocaleString?.() ?? result.total}</b> recipient(s).</p>
-                      <p className="muted" style={{ fontSize: 13 }}>
-                        {result.done
-                          ? 'All sent.'
-                          : `${result.sentNow ?? 0} sent so far — the rest continues in the background. You can safely close this tab; track live progress on the Campaigns page.`}
-                      </p>
-                    </>
-                  )}
-                  <button className="btn ghost mt12" onClick={() => router.push('/campaigns')}>Go to Campaigns →</button>
+                  <h3 style={{ marginTop: 0 }}>Run launched</h3>
+                  <p style={{ color: 'var(--green)' }}>✓ Sending to <b>{result.total?.toLocaleString?.() ?? result.total}</b> recipient(s).</p>
+                  <p className="muted" style={{ fontSize: 13 }}>
+                    {result.done
+                      ? 'All sent.'
+                      : `${result.sentNow ?? 0} sent so far — the rest drains in the background (atomic daily cap). Safe to close this tab; watch live progress on the run monitor.`}
+                  </p>
+                  <button className="btn mt12" onClick={() => router.push(`/runs?run=${result.runId}`)}>View run →</button>
                 </div>
               )}
             </div>
@@ -593,8 +590,7 @@ function ComposeInner() {
               <div className="kv"><span className="k">Attachments</span><span>{attachments.length ? `${attachments.length} file(s)` : <span className="faint">none — add in Content step</span>}</span></div>
               <button className="btn ghost mt16" style={{ width: '100%' }} disabled={test.isPending} onClick={sendTest}><FlaskConical size={15} /> Send a test to myself</button>
               {testMsg && <p className="faint mt8" style={{ fontSize: 12 }}>{testMsg}</p>}
-              <button className="btn ghost mt8" style={{ width: '100%' }} disabled={send.isPending} onClick={() => finalize(true)}><Eye size={15} /> Preview (dry run)</button>
-              <button className="btn mt8" style={{ width: '100%' }} disabled={send.isPending || create.isPending} onClick={askAndSend}><Zap size={15} /> Send now</button>
+              <button className="btn mt8" style={{ width: '100%' }} disabled={createEngineCampaign.isPending || createRun.isPending} onClick={askAndSend}><Zap size={15} /> Send now</button>
             </div>
           </div>
         )}

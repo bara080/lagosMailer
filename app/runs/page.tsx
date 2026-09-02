@@ -70,6 +70,8 @@ function RunsInner() {
   // Bridge: /runs?launch=<engineCampaignId> (from "Launch as run" on Compose)
   // opens the wizard on the Audience step with that campaign pre-selected.
   useEffect(() => {
+    const run = sp.get('run');
+    if (run) { setOpenRun(run); router.replace('/runs'); return; } // Compose → View run
     const launch = sp.get('launch');
     if (launch) {
       setSelected(launch);
