@@ -359,6 +359,23 @@ export async function drainChunk(company, runId) {
     const { count: ahead } = await pendingAt(sb.from('campaign_recipients')).gt('stage_number', cur);
     if (ahead) {
       await logEvent(company, runId, 'stage.completed', { stage: cur });
+
+      // Auto health-gate: HOLD the run if the just-completed stage's fail+bounce
+      // rate is too high, so a bad batch can't ramp to the next (larger) stage.
+      const cnt = (q) => q.select('*', { count: 'exact', head: true }).eq('company', company).eq('run_id', runId).eq('stage_number', cur);
+      const [{ count: stTot }, { count: stFail }, { count: stBounce }] = await Promise.all([
+        cnt(sb.from('campaign_recipients')),
+        cnt(sb.from('campaign_recipients')).eq('status', 'failed'),
+        cnt(sb.from('campaign_recipients')).not('bounced_at', 'is', null),
+      ]);
+      const bad = (stFail ?? 0) + (stBounce ?? 0);
+      const rate = (stTot ?? 0) ? bad / stTot : 0;
+      if ((stTot ?? 0) >= ENGINE.healthMinSample && rate > ENGINE.healthMaxFailRate) {
+        await setRunStatus(company, runId, 'gated');
+        await logEvent(company, runId, 'stage.health_gated', { stage: cur, total: stTot, failed: stFail ?? 0, bounced: stBounce ?? 0, rate: Math.round(rate * 1000) / 10, threshold: Math.round(ENGINE.healthMaxFailRate * 100) });
+        return { gated: true, health: true };
+      }
+
       // Gate: if the NEXT stage requires approval, HOLD (status `gated`) until the
       // operator continues. plan[cur] is stage cur+1 (0-indexed).
       const plan = Array.isArray(run.stage_plan) ? run.stage_plan : [];

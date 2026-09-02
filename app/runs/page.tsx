@@ -498,7 +498,7 @@ function Tile({ label, value, tone }: { label: string; value: number; tone?: str
 }
 
 function prettyEvent(t: string) {
-  return ({ 'run.created': 'Run created', 'audience.snapshotted': 'Audience snapshotted', 'run.started': 'Run started', 'batch.sent': 'Batch sent', 'stage.completed': 'Stage completed', 'stage.started': 'Stage started', 'stage.gated': 'Stage gate — paused', 'quota.waiting': 'Waiting on daily quota', 'run.completed': 'Run completed', 'run.paused': 'Run paused', 'run.resume': 'Run resumed', 'run.stop': 'Run stopped', 'email.delivered': 'Delivered', 'email.bounced': 'Bounced (suppressed)', 'email.complained': 'Complaint (suppressed)' } as Record<string, string>)[t] || t;
+  return ({ 'run.created': 'Run created', 'audience.snapshotted': 'Audience snapshotted', 'run.started': 'Run started', 'batch.sent': 'Batch sent', 'stage.completed': 'Stage completed', 'stage.started': 'Stage started', 'stage.gated': 'Stage gate — paused', 'stage.health_gated': 'Auto-paused — high failure rate', 'quota.waiting': 'Waiting on daily quota', 'run.completed': 'Run completed', 'run.paused': 'Run paused', 'run.resume': 'Run resumed', 'run.stop': 'Run stopped', 'email.delivered': 'Delivered', 'email.bounced': 'Bounced (suppressed)', 'email.complained': 'Complaint (suppressed)' } as Record<string, string>)[t] || t;
 }
 function eventDetail(ev: EngineEvent) {
   const d = ev.data || {};
@@ -507,6 +507,7 @@ function eventDetail(ev: EngineEvent) {
   if (ev.event_type === 'stage.completed') return `Stage ${d.stage} done.`;
   if (ev.event_type === 'stage.started') return `Stage ${d.stage} started.`;
   if (ev.event_type === 'stage.gated') return `Stage ${d.completed} complete — awaiting approval.`;
+  if (ev.event_type === 'stage.health_gated') return `Stage ${d.stage}: ${d.rate}% fail/bounce (>${d.threshold}% threshold) — ${d.failed} failed, ${d.bounced} bounced.`;
   if (ev.event_type === 'quota.waiting') return 'Daily cap reached — waiting for reset.';
   if (ev.event_type?.startsWith('email.')) return d.email || '';
   return Object.keys(d).length ? JSON.stringify(d) : '';
@@ -545,12 +546,18 @@ function RunMonitor({ runId, campaignName }: { runId: string; campaignName: stri
         </div>
       </div>
 
-      {status === 'gated' && (
-        <div className="wizard-note mt16" style={{ background: 'var(--amber-soft)' }}>
-          <CalendarClock size={15} color="var(--amber)" style={{ flexShrink: 0, marginTop: 1 }} />
-          <div><b style={{ color: 'var(--amber)' }}>Paused at stage gate</b><div className="faint" style={{ marginTop: 2 }}>Stage {run?.current_stage} complete — review the results below, then <b>Continue</b> to release the next stage.</div></div>
-        </div>
-      )}
+      {status === 'gated' && (() => {
+        const gateEv = (data?.events ?? []).find((e) => e.event_type === 'stage.health_gated' || e.event_type === 'stage.gated');
+        const health = gateEv?.event_type === 'stage.health_gated';
+        return (
+          <div className="wizard-note mt16" style={{ background: health ? 'var(--red-soft)' : 'var(--amber-soft)' }}>
+            {health ? <AlertCircle size={15} color="var(--red)" style={{ flexShrink: 0, marginTop: 1 }} /> : <CalendarClock size={15} color="var(--amber)" style={{ flexShrink: 0, marginTop: 1 }} />}
+            {health
+              ? <div><b style={{ color: 'var(--red)' }}>Auto-paused — high failure rate</b><div className="faint" style={{ marginTop: 2 }}>Stage {gateEv?.data?.stage} bounced/failed at <b>{gateEv?.data?.rate}%</b> (threshold {gateEv?.data?.threshold}%). Clean the list before ramping — only <b>Continue</b> if it's safe.</div></div>
+              : <div><b style={{ color: 'var(--amber)' }}>Paused at stage gate</b><div className="faint" style={{ marginTop: 2 }}>Stage {run?.current_stage} complete — review the results below, then <b>Continue</b> to release the next stage.</div></div>}
+          </div>
+        );
+      })()}
 
       {/* Big progress */}
       <div className="row between" style={{ alignItems: 'baseline', marginTop: 20 }}>

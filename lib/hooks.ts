@@ -61,6 +61,25 @@ export function useImportCsv() {
   });
 }
 
+export function useValidationCounts() {
+  return useQuery({ queryKey: ['validation-counts'], queryFn: api.validationCounts });
+}
+export function useValidateLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (limit?: number) => api.validateLeads(limit),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['validation-counts'] }); qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}
+
+export function useRemoveInvalidLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.removeInvalidLeads(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['validation-counts'] }); qc.invalidateQueries({ queryKey: ['leads'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}
+
 export function useSyncSheet() {
   const qc = useQueryClient();
   return useMutation({

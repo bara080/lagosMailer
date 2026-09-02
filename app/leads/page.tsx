@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet } from 'lucide-react';
+import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet, ShieldCheck } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StageBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useAddLead, useConfig, useDeleteLead, useImportCsv, useLeads, useSyncSheet, useUpdateLead } from '@/lib/hooks';
+import { useAddLead, useConfig, useDeleteLead, useImportCsv, useLeads, useSyncSheet, useUpdateLead, useValidationCounts, useValidateLeads, useRemoveInvalidLeads } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import type { Lead } from '@/lib/api';
 
@@ -34,6 +34,19 @@ export default function LeadsPage() {
   const { data, isLoading } = useLeads({ stage: tab, q: qDebounced, page, limit: PER_PAGE });
   const { data: config } = useConfig();
   const del = useDeleteLead();
+  const { data: vc } = useValidationCounts();
+  const validate = useValidateLeads();
+  const removeInvalid = useRemoveInvalidLeads();
+  const [vRun, setVRun] = useState<{ checked: number; valid: number; invalid: number; risky_relay: number; remaining: number } | null>(null);
+  async function runValidation() {
+    let acc = { checked: 0, valid: 0, invalid: 0, risky_relay: 0, remaining: 0 };
+    for (let i = 0; i < 200; i++) { // safety bound
+      const r = await validate.mutateAsync(2000);
+      acc = { checked: acc.checked + r.checked, valid: acc.valid + r.valid, invalid: acc.invalid + r.invalid, risky_relay: acc.risky_relay + r.risky_relay, remaining: r.remaining };
+      setVRun({ ...acc });
+      if (r.done || r.checked === 0) break;
+    }
+  }
   const upd = useUpdateLead();
   const sync = useSyncSheet();
   const confirm = useConfirm();
@@ -100,6 +113,26 @@ export default function LeadsPage() {
               }}><Trash2 size={14} /> Delete</button>
             </div>
           )}
+        </div>
+
+        <div className="card pad mt16" style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <span className="row gap8"><ShieldCheck size={16} color="var(--accent)" /><b style={{ fontSize: 14 }}>Email health</b></span>
+          <span className="run-stat g">✓ {(vc?.valid ?? 0).toLocaleString()} valid</span>
+          <span className="run-stat r">✗ {(vc?.invalid ?? 0).toLocaleString()} invalid</span>
+          <span className="run-stat a">◑ {(vc?.risky_relay ?? 0).toLocaleString()} Apple relay</span>
+          <span className="faint" style={{ fontSize: 12 }}>{(vc?.unchecked ?? 0).toLocaleString()} unchecked</span>
+          <span style={{ flex: 1 }} />
+          {validate.isPending && vRun && <span className="faint" style={{ fontSize: 12 }}>Validating… {vRun.checked.toLocaleString()} done · {vRun.remaining.toLocaleString()} left</span>}
+          {(vc?.invalid ?? 0) > 0 && (
+            <button className="btn ghost sm" disabled={removeInvalid.isPending} onClick={async () => {
+              if (!(await confirm({ title: 'Remove invalid leads?', message: <>Delete <b>{(vc?.invalid ?? 0).toLocaleString()}</b> dead-domain lead(s)? They stay on the suppression list (excluded from sends even if re-imported).</>, confirmLabel: 'Remove', danger: true }))) return;
+              const r = await removeInvalid.mutateAsync();
+              alert(`Removed ${r.removed.toLocaleString()} invalid leads.`);
+            }}><Trash2 size={14} /> Remove {(vc?.invalid ?? 0).toLocaleString()} invalid</button>
+          )}
+          <button className="btn ghost sm" disabled={validate.isPending || (vc?.unchecked ?? 0) === 0} onClick={runValidation}>
+            <ShieldCheck size={14} /> {validate.isPending ? 'Validating…' : `Validate ${(vc?.unchecked ?? 0).toLocaleString()} emails`}
+          </button>
         </div>
 
         <div className="row gap16 mt16" style={{ alignItems: 'flex-start' }}>

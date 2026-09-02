@@ -1,4 +1,5 @@
 import { getSupabase } from '../lib/supabase.js';
+import dns from 'dns';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lead store — the CRM data layer.
@@ -300,6 +301,98 @@ export async function importCsv(company, rows) {
   return { added };
 }
 
+// ── Email list validation (deliverability) ───────────────────────────────────
+// Marks each lead email_status: valid | invalid | risky_relay. `invalid` = bad
+// syntax or non-resolvable domain (no MX and no A record) → excluded from sends
+// (see resolveAudience). risky_relay = Apple Hide My Email (valid but flagged).
+// Domain MX checks are cached + concurrency-limited; processed in batches so a
+// single call fits the function time budget — the caller loops until `done`.
+const APPLE_RELAY = 'privaterelay.appleid.com';
+
+// true = domain can receive mail (has MX, or an A record as implicit MX).
+// Transient DNS errors resolve `true` so a hiccup never false-flags an address.
+async function domainCanReceive(domain) {
+  try {
+    const mx = await dns.promises.resolveMx(domain);
+    if (mx && mx.length) return true;
+  } catch (e) {
+    if (e.code !== 'ENOTFOUND' && e.code !== 'ENODATA') return true; // transient → assume ok
+  }
+  try {
+    const a = await dns.promises.resolve(domain);
+    return !!(a && a.length);
+  } catch {
+    return false; // NXDOMAIN / no records → cannot receive mail
+  }
+}
+
+export async function validateLeads(company, { limit = 2000 } = {}) {
+  const sb = getSupabase();
+  const { data: leads, error } = await sb.from(LEADS)
+    .select('id, email').eq('company', company).eq('email_status', 'unchecked').neq('email', '').limit(limit);
+  if (error) throw new Error(`validateLeads: ${error.message}`);
+  if (!leads || !leads.length) return { checked: 0, valid: 0, invalid: 0, risky_relay: 0, remaining: 0, done: true };
+
+  // MX-check unique domains (concurrency-limited, cached within the batch).
+  const cache = new Map();
+  const domains = [...new Set(leads.map((l) => (String(l.email).split('@')[1] || '').toLowerCase()).filter(Boolean))];
+  const CONC = 30;
+  for (let i = 0; i < domains.length; i += CONC) {
+    const chunk = domains.slice(i, i + CONC);
+    const results = await Promise.all(chunk.map(async (d) => [d, await domainCanReceive(d)]));
+    for (const [d, ok] of results) cache.set(d, ok);
+  }
+
+  // Classify each lead, then bulk-update per status.
+  const now = new Date().toISOString();
+  const byStatus = { valid: [], invalid: [], risky_relay: [] };
+  const invalidEmails = [];
+  for (const l of leads) {
+    const email = String(l.email).trim().toLowerCase();
+    const domain = (email.split('@')[1] || '').toLowerCase();
+    let status;
+    if (!/^\S+@\S+\.\S+$/.test(email)) status = 'invalid';
+    else if (domain === APPLE_RELAY) status = 'risky_relay';
+    else if (cache.get(domain) === false) status = 'invalid';
+    else status = 'valid';
+    byStatus[status].push(l.id);
+    if (status === 'invalid') invalidEmails.push(email);
+  }
+  for (const [status, ids] of Object.entries(byStatus)) {
+    for (let i = 0; i < ids.length; i += 1000) {
+      const c = ids.slice(i, i + 1000);
+      if (c.length) await sb.from(LEADS).update({ email_status: status, email_checked_at: now }).eq('company', company).in('id', c);
+    }
+  }
+  // Also add invalid addresses to the suppression list (the "bounced" list), so
+  // the engine excludes them even if they're re-imported later.
+  for (let i = 0; i < invalidEmails.length; i += 1000) {
+    const chunk = invalidEmails.slice(i, i + 1000).map((email) => ({ company, normalized_email: email, reason: 'invalid_domain', source: 'validation' }));
+    if (chunk.length) await sb.from('suppression_list').upsert(chunk, { onConflict: 'company,normalized_email', ignoreDuplicates: true });
+  }
+  const { count: remaining } = await sb.from(LEADS)
+    .select('*', { count: 'exact', head: true }).eq('company', company).eq('email_status', 'unchecked').neq('email', '');
+  return { checked: leads.length, valid: byStatus.valid.length, invalid: byStatus.invalid.length, risky_relay: byStatus.risky_relay.length, remaining: remaining ?? 0, done: (remaining ?? 0) === 0 };
+}
+
+// Delete leads flagged invalid (dead domain). They stay on the suppression list,
+// so they're excluded even if re-imported later. Returns how many were removed.
+export async function deleteInvalidLeads(company) {
+  const sb = getSupabase();
+  const { count } = await sb.from(LEADS).select('*', { count: 'exact', head: true }).eq('company', company).eq('email_status', 'invalid');
+  const { error } = await sb.from(LEADS).delete().eq('company', company).eq('email_status', 'invalid');
+  if (error) throw new Error(`deleteInvalidLeads: ${error.message}`);
+  return { removed: count ?? 0 };
+}
+
+// Validation summary counts (for the UI panel).
+export async function validationCounts(company) {
+  const sb = getSupabase();
+  const head = (s) => sb.from(LEADS).select('*', { count: 'exact', head: true }).eq('company', company).neq('email', '').eq('email_status', s);
+  const [valid, invalid, risky, unchecked] = await Promise.all([head('valid'), head('invalid'), head('risky_relay'), head('unchecked')]);
+  return { valid: valid.count ?? 0, invalid: invalid.count ?? 0, risky_relay: risky.count ?? 0, unchecked: unchecked.count ?? 0 };
+}
+
 // ── Sends + activity log (feeds the dashboard) ───────────────────────────────
 
 export async function logSend(company, { to, subject, status, source }) {
@@ -476,7 +569,7 @@ function audienceQuery(sb, company, f) {
       if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%`);
     }
   }
-  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub');
+  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub').neq('email_status', 'invalid');
   // Rolling batches: exclude anyone already emailed (has contacted_at) so a new
   // "send N" continues from where the last one stopped — no repeats across sends.
   if (f.skipEmailed) query = query.is('contacted_at', null);
@@ -538,7 +631,7 @@ function audienceCountQuery(sb, company, f) {
       if (s) query = query.or(`business.ilike.%${s}%,name.ilike.%${s}%,email.ilike.%${s}%`);
     }
   }
-  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub');
+  if (f.emailOnly !== false) query = query.neq('email', '').neq('stage', 'unsub').neq('email_status', 'invalid');
   if (f.skipEmailed) query = query.is('contacted_at', null);
   return query;
 }

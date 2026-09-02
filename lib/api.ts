@@ -164,6 +164,10 @@ export const api = {
   updateLead: (id: number, body: Partial<Lead>) => req<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteLead: (id: number) => req<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' }),
   importCsv: (csv: string) => req<{ added: number }>('/api/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  // Email list validation (syntax + MX). counts (GET) + validate a batch (POST, loop until done).
+  validationCounts: () => req<{ valid: number; invalid: number; risky_relay: number; unchecked: number }>('/api/leads/validate'),
+  validateLeads: (limit?: number) => req<{ checked: number; valid: number; invalid: number; risky_relay: number; remaining: number; done: boolean }>('/api/leads/validate', { method: 'POST', body: JSON.stringify({ limit }) }),
+  removeInvalidLeads: () => req<{ removed: number }>('/api/leads/validate', { method: 'DELETE' }),
   syncSheet: () => req<{ added: number; total: number }>('/api/sheets/sync', { method: 'POST' }),
   setSheet: (url: string, range?: string) => req<{ sheetId: string }>('/api/sheets/config', { method: 'POST', body: JSON.stringify({ url, range }) }),
   campaigns: () => req<{ campaigns: Campaign[]; counts: Counts }>('/api/campaigns'),

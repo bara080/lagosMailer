@@ -17,4 +17,9 @@ export const ENGINE = {
   capSleep: process.env.ENGINE_CAP_SLEEP || '1h',
   // Safety bound on the drain loop (≈ chunkSize × this = max emails per run).
   maxIterations: toInt(process.env.ENGINE_MAX_ITER, 200000),
+  // Auto health-gate: when a cadence stage completes, HOLD the run (status
+  // `gated`) if its fail+bounce rate exceeds this, so a bad batch can't ramp.
+  healthMinSample: toInt(process.env.ENGINE_HEALTH_MIN_SAMPLE, 20), // don't gate tiny stages (e.g. Test=1)
+  healthMaxFailRate: toFloat(process.env.ENGINE_HEALTH_MAX_FAIL_RATE, 0.15), // 15% fail+bounce
 };
+function toFloat(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
