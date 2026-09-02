@@ -122,6 +122,14 @@ export function useCreateCampaign() {
   });
 }
 
+export function useDeleteCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteCampaign(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaigns'] }); qc.invalidateQueries({ queryKey: ['stats'] }); },
+  });
+}
+
 export function useUpdateCampaign() {
   const qc = useQueryClient();
   return useMutation({
@@ -230,9 +238,26 @@ export function useRunRecipients(runId: string | null, params: { page?: number; 
 export function useEngineQuota() {
   return useQuery({ queryKey: ['engine-quota'], queryFn: api.engineQuota, refetchInterval: 5000 });
 }
+export function useNotifications() {
+  return useQuery({ queryKey: ['notifications'], queryFn: api.notifications, refetchInterval: 15000 });
+}
 export function useImportCampaign() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: number) => api.importCampaign(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['engine-campaigns'] }) });
+}
+export function useDeleteRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => api.deleteRun(runId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['engine-runs'] }); qc.invalidateQueries({ queryKey: ['notifications'] }); },
+  });
+}
+export function useDeleteEngineCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (campaignId: string) => api.deleteEngineCampaign(campaignId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['engine-campaigns'] }); qc.invalidateQueries({ queryKey: ['engine-runs'] }); },
+  });
 }
 export function useCreateEngineCampaign() {
   const qc = useQueryClient();

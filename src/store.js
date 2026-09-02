@@ -685,6 +685,12 @@ export async function updateCampaign(company, id, patch) {
   return cs[i];
 }
 
+export async function removeCampaign(company, id) {
+  const cs = await kvGet(company, 'campaigns', []);
+  await kvSet(company, 'campaigns', cs.filter((c) => c.id !== Number(id)));
+  return { ok: true };
+}
+
 export async function campaignCounts(company) {
   const cs = await listCampaigns(company);
   return {

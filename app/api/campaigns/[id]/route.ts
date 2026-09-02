@@ -27,3 +27,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const company = req.headers.get('x-company') || 'LagosTSQ';
+  const { id } = await params;
+  return NextResponse.json(await store.removeCampaign(company, id));
+}

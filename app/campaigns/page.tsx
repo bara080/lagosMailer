@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy, Rocket } from 'lucide-react';
+import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy, Rocket, Trash2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useCampaigns, useSendCampaign, useControlCampaign, useImportCampaign } from '@/lib/hooks';
+import { useCampaigns, useSendCampaign, useControlCampaign, useImportCampaign, useDeleteCampaign } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import type { Campaign } from '@/lib/api';
 
@@ -27,6 +27,7 @@ export default function CampaignsPage() {
   const send = useSendCampaign();
   const control = useControlCampaign();
   const importCampaign = useImportCampaign();
+  const del = useDeleteCampaign();
   const confirm = useConfirm();
   const [menu, setMenu] = useState<number | null>(null);
   const [viewing, setViewing] = useState<Campaign | null>(null); // view campaign content (sent or draft)
@@ -133,6 +134,8 @@ export default function CampaignsPage() {
                                   {(c.status === 'sending' || c.status === 'paused') && (
                                     <button className="mi danger" onClick={async () => { setMenu(null); if (await confirm({ title: 'Stop this campaign?', message: <>Stop <b>“{c.name}”</b>? Unsent recipients will be skipped.</>, confirmLabel: 'Stop', danger: true })) control.mutate({ id: c.id, action: 'stop' }); }}><StopCircle size={15} /> Stop</button>
                                   )}
+                                  <div className="sep" />
+                                  <button className="mi danger" disabled={del.isPending} onClick={async () => { setMenu(null); if (await confirm({ title: 'Delete this campaign?', message: <>Delete <b>“{c.name}”</b> from the list? This removes the draft/record — it won’t recall any emails already sent.</>, confirmLabel: 'Delete', danger: true })) del.mutate(c.id); }}><Trash2 size={15} /> Delete</button>
                                 </div>
                               </>
                             )}

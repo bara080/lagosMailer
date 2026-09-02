@@ -107,6 +107,7 @@ export interface EngineEvent { id: number; run_id: string; event_type: string; a
 export interface RunStage { stage: number; label: string; total: number; accepted: number; failed: number; pending: number; suppressed: number; status: 'complete' | 'running' | 'ready' | 'waiting'; }
 export interface EngineRecipient { id: string; normalized_email: string; status: string; stage_number: number; attempt_count: number; provider: string | null; provider_message_id: string | null; last_error_message: string | null; accepted_at: string | null; }
 export interface EngineQuota { accepted: number; reserved: number; limit: number; }
+export interface EngineNotification { id: number; type: string; run_id: string | null; run_status: string | null; campaign: string; data: any; created_at: string; actionable: boolean; }
 export interface NewRunBody { versionId?: string; audienceMode: string; audienceFilter?: any; duplicatePolicy?: string; dispatchChunkSize?: number; sourceRunId?: string; stagePlan?: { label?: string; limit: number | null }[]; }
 
 import { getCompany } from './companies';
@@ -174,6 +175,7 @@ export const api = {
   campaign: (id: number) => req<Campaign>(`/api/campaigns/${id}`),
   createCampaign: (body: Partial<Campaign>) => req<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) }),
   updateCampaign: (id: number, body: Partial<Campaign>) => req<Campaign>(`/api/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteCampaign: (id: number) => req<{ ok: boolean }>(`/api/campaigns/${id}`, { method: 'DELETE' }),
   // Sends ONE batch and returns progress. Use sendCampaignAll() to run a whole
   // campaign (it loops this until `done`).
   sendCampaignBatch: (id: number, dryRun: boolean, size?: number) =>
@@ -199,8 +201,11 @@ export const api = {
     return req<{ recipients: EngineRecipient[]; total: number; page: number; limit: number }>(`/api/engine/runs/${runId}/recipients?${s}`);
   },
   engineQuota: () => req<EngineQuota>('/api/engine/quota'),
+  notifications: () => req<{ items: EngineNotification[]; unread: number }>('/api/engine/notifications'),
   controlRun: (runId: string, action: 'pause' | 'resume' | 'stop' | 'continue') =>
     req<{ ok: boolean; status: string }>(`/api/engine/runs/${runId}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
+  deleteRun: (runId: string) => req<{ ok: boolean }>(`/api/engine/runs/${runId}`, { method: 'DELETE' }),
+  deleteEngineCampaign: (campaignId: string) => req<{ ok: boolean }>(`/api/engine/campaigns/${campaignId}`, { method: 'DELETE' }),
   testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
   listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),

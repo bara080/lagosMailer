@@ -83,7 +83,16 @@ Campaign runs are durable rows; dedup + atomic quota are real. All tested E2E.
       bounces/complaints (excluded from future snapshots). Verified `accepted 2 · delivered 1 · bounced 1`.
 - [x] Monitor **Delivered** tile is real; Failed rolls in bounces.
 - [ ] Env to activate: `RESEND_WEBHOOK_SECRET` (+ webhook added in Resend dashboard) — set locally; needs Vercel + deploy.
-- [ ] Stage HEALTH-gates (auto-gate on bounce/complaint thresholds) — still manual-only.
+- [x] **Stage HEALTH-gates (DONE 2026-09-02).** `drainChunk` checks the just-completed stage's fail+bounce
+      rate; if `> ENGINE_HEALTH_MAX_FAIL_RATE` (default 15%, min sample 20) it auto-`gated`s the run
+      (event `stage.health_gated`) instead of ramping. Monitor shows a red "Auto-paused — high failure rate"
+      banner. Verified: 66.7% fail → auto-gated at stage 1.
+- [x] **Email list validation (DONE 2026-09-02).** `leads.email_status` (valid/invalid/risky_relay/unchecked)
+      via syntax + MX check (`validateLeads`, batched, domain-cached, DNS per-lookup timeout). `invalid` =
+      dead domain → excluded from `resolveAudience` AND added to `suppression_list` (reason invalid_domain).
+      `risky_relay` = Apple Hide My Email (kept, flagged). Leads "Email health" bar: counts + Validate +
+      Remove-invalid. **Ran on the real 63k: 62,953 valid · 366 invalid · 165 Apple relay** (invalid
+      backfilled to suppression). risky_relay Apple addresses NOT auto-removed (per todo).
 
 ### ~ Phase 3 — controlled concurrency (PARTIAL)
 - [x] Atomic shared quota (`reserve_quota` locks the bucket) — concurrent runs already can't exceed the cap.
@@ -113,5 +122,7 @@ Campaign runs are durable rows; dedup + atomic quota are real. All tested E2E.
 ## Status
 Engine spec is built end-to-end (relational ledger → concurrency-safe quota → cadence → gates → wizard →
 monitor → delivery webhooks + suppression → **Compose convergence**), all verified via node/MCP + `next build`.
-Compose's Send AND the Campaigns "Launch as run" bridge both launch engine runs. Remaining: **deploy** (commit
-+ push + Vercel env), the final KV-path cutover comment-out, stage HEALTH-gates, and the fair scheduler.
+Compose's Send AND the Campaigns "Launch as run" bridge both launch engine runs. **Deliverability stack complete:**
+pre-send list validation (drops + suppresses dead domains) → cadence + auto health-gate (stops a bad ramp) →
+post-send Resend webhooks (auto-suppress mailbox bounces, needs deploy). Remaining: **deploy** (commit + push
++ Vercel env), the final KV-path cutover comment-out, and the fair scheduler.

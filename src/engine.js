@@ -91,6 +91,52 @@ export async function listCampaigns(company) {
   return data || [];
 }
 
+// Recent notable events across a company's runs (for the notification bell).
+// `unread` = items that need attention (a run paused at a gate).
+const NOTABLE_EVENTS = ['run.completed', 'stage.health_gated', 'stage.gated', 'quota.waiting', 'run.stop'];
+export async function recentNotifications(company, { limit = 25 } = {}) {
+  const sb = getSupabase();
+  const { data: events } = await sb.from('campaign_events').select('*')
+    .eq('company', company).in('event_type', NOTABLE_EVENTS).order('created_at', { ascending: false }).limit(limit);
+  const runIds = [...new Set((events || []).map((e) => e.run_id).filter(Boolean))];
+  const runs = runIds.length ? (await sb.from('campaign_runs').select('id, campaign_id, status').eq('company', company).in('id', runIds)).data || [] : [];
+  const runMap = new Map(runs.map((r) => [r.id, r]));
+  const campIds = [...new Set(runs.map((r) => r.campaign_id))];
+  const camps = campIds.length ? (await sb.from('campaigns').select('id, name').eq('company', company).in('id', campIds)).data || [] : [];
+  const campMap = new Map(camps.map((c) => [c.id, c.name]));
+  const items = (events || []).map((e) => {
+    const run = runMap.get(e.run_id);
+    const gate = e.event_type === 'stage.gated' || e.event_type === 'stage.health_gated';
+    return {
+      id: e.id, type: e.event_type, run_id: e.run_id, run_status: run?.status || null,
+      campaign: (run && campMap.get(run.campaign_id)) || 'Campaign',
+      data: e.data || {}, created_at: e.created_at,
+      actionable: gate && run?.status === 'gated', // a run waiting at a gate
+    };
+  });
+  return { items, unread: items.filter((i) => i.actionable).length };
+}
+
+// Delete a run (cascades its recipients; also clears its audit events).
+export async function deleteRun(company, runId) {
+  const sb = getSupabase();
+  await sb.from('campaign_events').delete().eq('company', company).eq('run_id', runId);
+  const { error } = await sb.from('campaign_runs').delete().eq('company', company).eq('id', runId);
+  if (error) throw new Error(`deleteRun: ${error.message}`);
+  return { ok: true };
+}
+
+// Delete a campaign (cascades versions → runs → recipients; clears run events).
+export async function deleteCampaign(company, campaignId) {
+  const sb = getSupabase();
+  const runs = (await sb.from('campaign_runs').select('id').eq('company', company).eq('campaign_id', campaignId)).data || [];
+  const runIds = runs.map((r) => r.id);
+  if (runIds.length) await sb.from('campaign_events').delete().eq('company', company).in('run_id', runIds);
+  const { error } = await sb.from('campaigns').delete().eq('company', company).eq('id', campaignId);
+  if (error) throw new Error(`deleteCampaign: ${error.message}`);
+  return { ok: true };
+}
+
 // Fetch a single campaign (incl. current_version_id).
 export async function getCampaign(company, campaignId) {
   const sb = getSupabase();

@@ -327,6 +327,14 @@ function ComposeInner() {
   // the frozen content — no re-compose, no duplicate campaign).
   async function sendToAll() {
     if (!result?.campaignId) return;
+    const ok = await confirm({
+      title: 'Send to ALL leads?',
+      message: <>This sends the campaign to <b>every eligible lead</b> (excludes unsubscribed, suppressed, and invalid addresses). These are <b>real emails</b> and can’t be undone — it rolls out under the daily cap over multiple days.</>,
+      confirmLabel: 'Send to all leads',
+      danger: true,
+      requireText: 'SEND',
+    });
+    if (!ok) return;
     const res = await createRun.mutateAsync({ campaignId: result.campaignId, body: { audienceMode: 'all', audienceFilter: {} } });
     router.push(`/runs?run=${res.run.id}`);
   }

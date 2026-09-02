@@ -1,10 +1,11 @@
 'use client';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Rocket, Pause, Play, StopCircle, RotateCcw, Layers, Check, AlertCircle, X, Folder, FilePlus2, Users, UserCheck, CalendarClock } from 'lucide-react';
+import { Plus, Rocket, Pause, Play, StopCircle, RotateCcw, Layers, Check, AlertCircle, X, Folder, FilePlus2, Users, UserCheck, CalendarClock, Trash2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, EmptyState, Modal, Stepper } from '@/components/ui';
-import { useConfig, useEngineCampaigns, useEngineRuns, useRunDetail, useCreateEngineCampaign, useCreateRun, useControlRun, useAudiencePreview, useEngineQuota, useRunRecipients } from '@/lib/hooks';
+import { useConfig, useEngineCampaigns, useEngineRuns, useRunDetail, useCreateEngineCampaign, useCreateRun, useControlRun, useAudiencePreview, useEngineQuota, useRunRecipients, useDeleteRun, useDeleteEngineCampaign } from '@/lib/hooks';
+import { useConfirm } from '@/components/ConfirmProvider';
 import type { RunStage, EngineEvent } from '@/lib/api';
 
 // Minimal plain-text → HTML (blank line = paragraph). The engine stores both.
@@ -66,6 +67,9 @@ function RunsInner() {
   const [showNew, setShowNew] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
   const [launchStep, setLaunchStep] = useState(0);
+  const confirm = useConfirm();
+  const delRun = useDeleteRun();
+  const delCampaign = useDeleteEngineCampaign();
   const RUNS_PER_PAGE = 8;
   const [runPage, setRunPage] = useState(1);
   useEffect(() => { setRunPage(1); }, [activeCampaign]);
@@ -128,7 +132,15 @@ function RunsInner() {
           <div className="card pad">
             <div className="row between">
               <h3 style={{ margin: 0 }}>{campaigns.find((c) => c.id === activeCampaign)?.name || 'Runs'}</h3>
-              <button className="btn" onClick={() => { setLaunchStep(0); setShowLaunch(true); }}><Rocket size={15} /> Launch run</button>
+              <div className="row gap8">
+                {activeCampaign && (
+                  <button className="btn ghost sm" disabled={delCampaign.isPending} onClick={async () => {
+                    const name = campaigns.find((c) => c.id === activeCampaign)?.name;
+                    if (await confirm({ title: 'Delete campaign?', message: <>Delete <b>“{name}”</b> and <b>all its runs</b>? Can’t be undone — already-sent emails aren’t recalled.</>, confirmLabel: 'Delete', danger: true })) { await delCampaign.mutateAsync(activeCampaign); setSelected(null); }
+                  }}><Trash2 size={14} /> Delete</button>
+                )}
+                <button className="btn" onClick={() => { setLaunchStep(0); setShowLaunch(true); }}><Rocket size={15} /> Launch run</button>
+              </div>
             </div>
             {!activeCampaign ? <EmptyState title="Select a campaign" hint="Pick a campaign on the left, or create one." /> :
               runs.length === 0 ? <p className="faint mt12" style={{ fontSize: 13 }}>No runs yet. Launch one to start sending.</p> : (
@@ -153,6 +165,7 @@ function RunsInner() {
                           {pr.failed > 0 && <span className="run-stat r"><AlertCircle size={12} /> {pr.failed.toLocaleString()}</span>}
                           <span className="run-stat">{pr.pending.toLocaleString()} left</span>
                           <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); setOpenRun(r.id); }}>Open</button>
+                          <button className="icon-btn sm" title="Delete run" onClick={async (e) => { e.stopPropagation(); if (await confirm({ title: 'Delete run?', message: <>Delete this run and its recipient records? Can’t be undone.</>, confirmLabel: 'Delete', danger: true })) delRun.mutate(r.id); }}><Trash2 size={14} /></button>
                         </div>
                       </div>
                       <div className="mt12"><ProgressBar total={total} accepted={pr.accepted} failed={pr.failed} suppressed={pr.suppressed} /></div>

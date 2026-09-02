@@ -12,3 +12,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ runI
   if (!detail) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json(detail);
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
+  const company = req.headers.get('x-company') || 'LagosTSQ';
+  const { runId } = await params;
+  return NextResponse.json(await engine.deleteRun(company, runId));
+}
