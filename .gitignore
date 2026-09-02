@@ -14,11 +14,9 @@ data/
 .vercel
 .env*
 
-# Local scratch notes
-todo.md
-brain.md
-performance.md
-MODULE.md
+# Local scratch notes & docs — ignore all markdown except the project README
+*.md
+!README.md
 .agents/
 .claude/
 skills-lock.json

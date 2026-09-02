@@ -254,13 +254,43 @@ export async function ingestProviderEvent(provider, eventId, type, data = {}) {
 }
 
 // Today's engine quota usage (for the monitor's "Daily quota" header).
+// Start of the current quota day (ENGINE.timezone) as a UTC ISO string. DST-safe.
+function quotaDayStartUTC() {
+  const tz = ENGINE.timezone || 'UTC';
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()); // YYYY-MM-DD in tz
+  const utcGuess = new Date(`${dateStr}T00:00:00Z`);
+  const tzAtGuess = new Date(utcGuess.toLocaleString('en-US', { timeZone: tz }));
+  return new Date(utcGuess.getTime() + (utcGuess.getTime() - tzAtGuess.getTime())).toISOString();
+}
+
+// Today's send count. Derived from ACTUAL recipient records (accepted_at within the
+// quota day), not the mutable quota_buckets counter — so an interrupted run or a
+// manual DB edit can't make the nav-bar total drift from reality. `reserved` is the
+// live in-flight count. The bucket remains only the atomic reservation guard.
 export async function quotaToday(company) {
   const sb = getSupabase();
   const cap = await store.getDailyCap(company);
-  const { data } = await sb.from('quota_buckets')
-    .select('accepted_count, reserved_count, limit_count')
-    .eq('company', company).eq('channel', ENGINE.channel).eq('quota_date', quotaDate()).maybeSingle();
-  return { accepted: data?.accepted_count || 0, reserved: data?.reserved_count || 0, limit: data?.limit_count || cap };
+  const since = quotaDayStartUTC();
+  const { count: accepted } = await sb.from('campaign_recipients').select('*', { count: 'exact', head: true })
+    .eq('company', company).in('status', ['accepted', 'delivered']).gte('accepted_at', since);
+  const { count: reserved } = await sb.from('campaign_recipients').select('*', { count: 'exact', head: true })
+    .eq('company', company).eq('status', 'sending');
+  return { accepted: accepted || 0, reserved: reserved || 0, limit: cap };
+}
+
+// Reconcile the atomic reservation bucket back to reality: accepted = today's actual
+// accepted, reserved = actual in-flight. Fixes leaked reservations (e.g. after a
+// stopped/interrupted run) that would otherwise block reserve_quota for the rest of
+// the day. Safe to call when no run is actively draining.
+export async function reconcileQuota(company) {
+  const sb = getSupabase();
+  const cap = await store.getDailyCap(company);
+  const q = await quotaToday(company);
+  await sb.from('quota_buckets').upsert({
+    company, channel: ENGINE.channel, quota_date: quotaDate(),
+    accepted_count: q.accepted, reserved_count: q.reserved, limit_count: cap,
+  }, { onConflict: 'company,channel,quota_date' });
+  return { ...q, reconciled: true };
 }
 
 export async function getRun(company, runId) {
