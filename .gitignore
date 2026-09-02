@@ -18,6 +18,8 @@ data/
 todo.md
 brain.md
 performance.md
+MODULE.md
 .agents/
 .claude/
 skills-lock.json
+/.swc

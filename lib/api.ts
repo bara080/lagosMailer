@@ -90,7 +90,24 @@ export interface Signature {
   socials: { instagram?: string; tiktok?: string; facebook?: string; x?: string };
 }
 
-export interface Config { smtpReady: boolean; from: string; senders: string[]; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; dailyCap: number; sentToday: number; }
+export interface Config { smtpReady: boolean; from: string; senders: string[]; emailProvider: 'smtp' | 'resend'; mailReady: boolean; resendReady: boolean; smsReady: boolean; smsFrom: string; sheetReady: boolean; sheetHasCreds: boolean; sheetUrl: string; company: string; stages: Stage[]; signature: Signature | null; dailyCap: number; sentToday: number; }
+
+// ── Campaign job engine (relational; see src/engine.js) ──────────────────────
+export interface EngineCampaign { id: string; company: string; name: string; status: string; current_version_id: string | null; created_at: string; updated_at: string; }
+export interface EngineRun {
+  id: string; campaign_id: string; campaign_version_id: string; status: string;
+  audience_mode: string; audience_filter: any; duplicate_policy: string; source_run_id: string | null;
+  audience_count: number; dispatch_chunk_size: number; current_stage: number; created_at: string; started_at: string | null; completed_at: string | null;
+  progress?: { total: number; accepted: number; failed: number; pending: number; suppressed: number };
+}
+export interface RunProgress { total: number; pending: number; sending: number; accepted: number; delivered: number; bounced: number; complained: number; failed: number; suppressed: number; cancelled: number; }
+// Note: `delivered`/`bounced` come from webhook timestamps (delivery signal),
+// separate from the send `status` — so delivered ≤ accepted.
+export interface EngineEvent { id: number; run_id: string; event_type: string; actor_type: string; data: any; created_at: string; }
+export interface RunStage { stage: number; label: string; total: number; accepted: number; failed: number; pending: number; suppressed: number; status: 'complete' | 'running' | 'ready' | 'waiting'; }
+export interface EngineRecipient { id: string; normalized_email: string; status: string; stage_number: number; attempt_count: number; provider: string | null; provider_message_id: string | null; last_error_message: string | null; accepted_at: string | null; }
+export interface EngineQuota { accepted: number; reserved: number; limit: number; }
+export interface NewRunBody { versionId?: string; audienceMode: string; audienceFilter?: any; duplicatePolicy?: string; dispatchChunkSize?: number; sourceRunId?: string; stagePlan?: { label?: string; limit: number | null }[]; }
 
 import { getCompany } from './companies';
 
@@ -159,6 +176,25 @@ export const api = {
     req<SendProgress>(`/api/campaigns/${id}/send`, { method: 'POST', body: JSON.stringify({ dryRun, size }) }),
   controlCampaign: (id: number, action: 'pause' | 'stop' | 'resume' | 'resend') =>
     req<{ ok: boolean; action: string }>(`/api/campaigns/${id}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
+
+  // ── Campaign job engine ────────────────────────────────────────────────────
+  engineCampaigns: () => req<{ campaigns: EngineCampaign[] }>('/api/engine/campaigns'),
+  createEngineCampaign: (body: { name: string; subject: string; html: string; text: string; senderKey?: string; providerKey?: string; replyTo?: string; attachments?: Attachment[] }) =>
+    req<{ campaign: EngineCampaign; version: any }>('/api/engine/campaigns', { method: 'POST', body: JSON.stringify(body) }),
+  engineRuns: (campaignId: string) => req<{ runs: EngineRun[] }>(`/api/engine/campaigns/${campaignId}/runs`),
+  createRun: (campaignId: string, body: NewRunBody) =>
+    req<{ run: EngineRun; snapshot: { count: number }; workflowStarted: boolean }>(`/api/engine/campaigns/${campaignId}/runs`, { method: 'POST', body: JSON.stringify(body) }),
+  runDetail: (runId: string) => req<{ run: EngineRun; progress: RunProgress; events: EngineEvent[]; stages: RunStage[] }>(`/api/engine/runs/${runId}`),
+  runRecipients: (runId: string, params: { page?: number; limit?: number; status?: string } = {}) => {
+    const s = new URLSearchParams();
+    if (params.page) s.set('page', String(params.page));
+    if (params.limit) s.set('limit', String(params.limit));
+    if (params.status) s.set('status', params.status);
+    return req<{ recipients: EngineRecipient[]; total: number; page: number; limit: number }>(`/api/engine/runs/${runId}/recipients?${s}`);
+  },
+  engineQuota: () => req<EngineQuota>('/api/engine/quota'),
+  controlRun: (runId: string, action: 'pause' | 'resume' | 'stop' | 'continue') =>
+    req<{ ok: boolean; status: string }>(`/api/engine/runs/${runId}/control`, { method: 'POST', body: JSON.stringify({ action }) }),
   testSend: (body: { subject: string; html: string; text: string; attachments?: Attachment[] }) =>
     req<{ sent: number; to: string }>('/api/campaigns/test', { method: 'POST', body: JSON.stringify(body) }),
   listAssets: () => req<{ assets: Asset[]; blobReady: boolean }>('/api/assets'),

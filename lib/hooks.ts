@@ -178,6 +178,58 @@ export function useDeleteAsset() {
   });
 }
 
+// ── Campaign job engine ──────────────────────────────────────────────────────
+export function useEngineCampaigns() {
+  return useQuery({ queryKey: ['engine-campaigns'], queryFn: api.engineCampaigns });
+}
+export function useEngineRuns(campaignId: string | null) {
+  return useQuery({
+    queryKey: ['engine-runs', campaignId],
+    queryFn: () => api.engineRuns(campaignId as string),
+    enabled: !!campaignId,
+    // Poll while any run is in flight so statuses stay fresh.
+    refetchInterval: (q) => (q.state.data?.runs?.some((r) => ['queued', 'running', 'paused', 'stopping'].includes(r.status)) ? 3000 : false),
+  });
+}
+export function useRunDetail(runId: string | null) {
+  return useQuery({
+    queryKey: ['engine-run', runId],
+    queryFn: () => api.runDetail(runId as string),
+    enabled: !!runId,
+    // Live cadence: poll while the run is active.
+    refetchInterval: (q) => (['queued', 'running', 'paused', 'stopping'].includes(q.state.data?.run?.status || '') ? 2000 : false),
+  });
+}
+export function useRunRecipients(runId: string | null, params: { page?: number; limit?: number; status?: string }) {
+  return useQuery({
+    queryKey: ['engine-recipients', runId, params],
+    queryFn: () => api.runRecipients(runId as string, params),
+    enabled: !!runId,
+    placeholderData: (prev) => prev,
+  });
+}
+export function useEngineQuota() {
+  return useQuery({ queryKey: ['engine-quota'], queryFn: api.engineQuota, refetchInterval: 5000 });
+}
+export function useCreateEngineCampaign() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: api.createEngineCampaign, onSuccess: () => qc.invalidateQueries({ queryKey: ['engine-campaigns'] }) });
+}
+export function useCreateRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId, body }: { campaignId: string; body: import('./api').NewRunBody }) => api.createRun(campaignId, body),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['engine-runs', v.campaignId] }); qc.invalidateQueries({ queryKey: ['engine-campaigns'] }); },
+  });
+}
+export function useControlRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, action }: { runId: string; action: 'pause' | 'resume' | 'stop' | 'continue' }) => api.controlRun(runId, action),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['engine-run', v.runId] }); qc.invalidateQueries({ queryKey: ['engine-runs'] }); },
+  });
+}
+
 export function useSetSettings() {
   const qc = useQueryClient();
   return useMutation({

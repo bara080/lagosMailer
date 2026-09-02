@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as store from '@/src/store.js';
+import * as engine from '@/src/engine.js';
 import { sendCampaignBatch } from '@/lib/send.js';
 import { COMPANIES } from '@/lib/companies';
 
@@ -20,8 +21,9 @@ export async function GET(req: NextRequest) {
 
   const processed: any[] = [];
   for (const co of COMPANIES.map((c) => c.id)) {
+    // Legacy KV campaigns.
     let camps: any[] = [];
-    try { camps = await store.listCampaigns(co); } catch { continue; }
+    try { camps = await store.listCampaigns(co); } catch { camps = []; }
     for (const c of camps) {
       if (c.status === 'sending' && Array.isArray(c.queue) && c.queue.length) {
         try {
@@ -32,6 +34,18 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    // New job engine: drain one chunk per runnable run (fallback when the durable
+    // workflow isn't driving it). Fair enough for the cron; the workflow paces itself.
+    try {
+      for (const r of await engine.listRunnableRuns(co)) {
+        try {
+          const out: any = await engine.drainRunOnce(co, r.id);
+          processed.push({ company: co, runId: r.id, engine: true, sentNow: out.sentNow, done: out.done });
+        } catch (e: any) {
+          processed.push({ company: co, runId: r.id, engine: true, error: e.message });
+        }
+      }
+    } catch { /* engine tables may not exist yet — skip */ }
   }
   return NextResponse.json({ ok: true, at: new Date().toISOString(), processed });
 }

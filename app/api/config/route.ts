@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as store from '@/src/store.js';
-import { smtpConfig, telnyxConfig } from '@/lib/send.js';
+import { smtpConfig, telnyxConfig, mailerConfig } from '@/lib/send.js';
+import { resendConfig } from '@/lib/resend.js';
 import { sheetConfig } from '@/lib/gsheets.js';
 
 export const runtime = 'nodejs';
@@ -9,6 +10,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const company = req.headers.get('x-company') || 'LagosTSQ';
   const cfg = smtpConfig(company);
+  const mailer = mailerConfig(company);   // which provider is ACTIVE
+  const resend = resendConfig(company);   // is Resend even available
   const sms = telnyxConfig(company);
   const sheet = await sheetConfig(company);
   const settings = await store.getSettings(company);
@@ -24,6 +27,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     smtpReady: cfg.ready, from: cfg.from, senders,
+    emailProvider: mailer.provider, mailReady: mailer.ready, resendReady: resend.ready,
     smsReady: sms.ready, smsFrom: sms.from || sms.messagingProfileId || '',
     sheetReady: sheet.ready, sheetHasCreds: sheet.hasCreds, sheetUrl: sheet.sheetUrl,
     company, stages: store.STAGES,

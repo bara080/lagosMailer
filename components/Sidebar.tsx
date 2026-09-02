@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Send, PenSquare, MessageSquare, FileText, BarChart3, Settings,
-  ShieldCheck, ShieldAlert, PanelLeftClose, PanelLeftOpen, Image as ImageIcon,
+  ShieldCheck, ShieldAlert, PanelLeftClose, PanelLeftOpen, Image as ImageIcon, Rocket,
 } from 'lucide-react';
 import { useConfig } from '@/lib/hooks';
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Users },
   { href: '/campaigns', label: 'Campaigns', icon: Send },
+  { href: '/runs', label: 'Runs', icon: Rocket },
   { href: '/compose', label: 'Compose', icon: PenSquare },
   { href: '/sms', label: 'SMS', icon: MessageSquare },
   { href: '/templates', label: 'Templates', icon: FileText },

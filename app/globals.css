@@ -267,6 +267,39 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .bar.purple > span { background: var(--purple); }
 .bar.red > span { background: var(--red); }
 
+/* Segmented progress + run cards (Runs page) */
+.progress-track { display: flex; height: 8px; border-radius: 6px; overflow: hidden; background: var(--surface-3); border: 1px solid var(--border); }
+.progress-track > span { height: 100%; transition: width .3s ease; }
+.progress-track .seg-green { background: var(--green); }
+.progress-track .seg-red { background: var(--red); }
+.progress-track .seg-amber { background: var(--amber); }
+.progress-track .seg-blue { background: var(--accent); }
+.run-card { transition: border-color .12s ease, background .12s ease; cursor: pointer; }
+.run-card:hover { border-color: var(--accent); }
+.run-stat { font-size: 12px; font-weight: 600; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; }
+.run-stat.g { color: var(--green); }
+.run-stat.r { color: var(--red); }
+.run-stat.a { color: var(--amber); }
+
+/* Stepper (1..N wizard header) */
+.stepper-track { height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; margin-bottom: 16px; }
+.stepper-track > span { display: block; height: 100%; background: linear-gradient(90deg, var(--green), var(--accent)); transition: width .22s ease; }
+.stepper-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+.stepper-step { display: flex; flex-direction: column; gap: 2px; }
+.stepper-num { font-size: 15px; font-weight: 700; color: var(--text-faint); }
+.stepper-label { font-size: 13px; color: var(--text-faint); }
+.stepper-step.active .stepper-num, .stepper-step.active .stepper-label { color: var(--accent); }
+.stepper-step.done .stepper-num, .stepper-step.done .stepper-label { color: var(--green); }
+/* Selectable option cards (wizard) */
+.pick-card { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; transition: border-color .12s ease, background .12s ease; }
+.pick-card:hover { border-color: var(--border-2); }
+.pick-card.sel { border-color: var(--accent); background: var(--green-soft); }
+.pick-card .pick-ic { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; color: var(--text-dim); flex-shrink: 0; }
+.pick-card.sel .pick-ic { color: var(--accent); }
+.pick-card .pick-title { font-weight: 600; color: var(--text); }
+.pick-card .pick-sub { font-size: 12.5px; color: var(--text-dim); }
+.wizard-note { display: flex; gap: 8px; font-size: 12.5px; color: var(--text-dim); background: var(--green-soft); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+
 /* ── Donut / chart ─────────────────────────────────────────────────────── */
 .donut-wrap { display: flex; align-items: center; gap: 18px; }
 .donut { position: relative; }
