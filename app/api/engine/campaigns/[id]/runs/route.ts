@@ -37,16 +37,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
     const snapshot = await engine.snapshotAudience(company, run.id);
 
-    // Drain the FIRST chunk synchronously → instant progress in the UI (and works
-    // in local dev where the durable workflow runtime isn't running).
-    let first: any = null;
-    try { first = await engine.drainRunOnce(company, run.id); } catch { /* reported via run status */ }
+    // NOTE: previously we drained the FIRST chunk synchronously here for "instant
+    // progress". But sending ~50 emails via SMTP in-request took 1–2+ min, hanging
+    // the HTTP request past the client/proxy timeout — which re-enabled the Send
+    // button and led to accidental double-submits (two runs for one click).
+    // Now we snapshot and hand off to the durable workflow immediately; the run
+    // monitor shows live progress within seconds as the workflow drains.
+    // LEGACY (commented for rollback):
+    // let first: any = null;
+    // try { first = await engine.drainRunOnce(company, run.id); } catch { /* reported via run status */ }
+    const first: any = null;
 
-    // Hand the rest off to the durable workflow (cron drains as fallback).
+    // Hand off to the durable workflow (cron drains as fallback in local dev).
     let workflowStarted = false;
-    if (!first?.done) {
-      try { await start(sendRunWorkflow, [company, run.id]); workflowStarted = true; } catch { /* cron fallback */ }
-    }
+    try { await start(sendRunWorkflow, [company, run.id]); workflowStarted = true; } catch { /* cron fallback */ }
 
     return NextResponse.json({ run, snapshot, first, workflowStarted });
   } catch (e: any) {

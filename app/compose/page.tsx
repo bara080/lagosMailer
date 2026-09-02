@@ -104,6 +104,7 @@ function ComposeInner() {
   });
   const set = (k: string) => (e: any) => setForm({ ...form, [k]: e.target.value });
   const [result, setResult] = useState<any>(null);
+  const submittingRef = useRef(false); // hard guard against double-submitting a send
 
   // Refs to the editable fields, so "Add a detail" inserts at the caret of the
   // field the user is actually editing.
@@ -308,7 +309,10 @@ function ComposeInner() {
   }
 
   async function finalize(_dryRun?: boolean) {
+    if (submittingRef.current) return; // already launching — ignore re-entry
+    submittingRef.current = true;
     setResult(null);
+    try {
     // LEGACY (KV campaign + sendCampaignBatch) — replaced by the engine launch
     // below; kept for rollback:
     // const payload = { name: form.name, subject: toBackend(form.subject), html: plainToHtml(toBackend(form.message)), text: toBackend(form.message), fromName: form.fromName, fromAddress: effectiveFrom, replyTo: form.replyTo, audience, status: 'draft', attachments };
@@ -330,9 +334,17 @@ function ComposeInner() {
     });
     const audienceMode = mode === 'custom' ? 'explicit' : 'segment';
     const res = await createRun.mutateAsync({ campaignId: camp.campaign.id, body: { audienceMode, audienceFilter: audience, dispatchChunkSize: 50 } });
-    // Keep the campaign id + whether this was a test so the result screen can
-    // offer "Send to all leads" — reuse the same frozen content, new audience.
-    setResult({ started: true, name: form.name, total: res.snapshot?.count ?? recipientCount, sentNow: res.first?.sentNow ?? 0, done: res.first?.done, runId: res.run.id, campaignId: camp.campaign.id, wasTest: mode === 'custom' });
+      if (mode === 'custom') {
+        // Test send → show the result panel (offers "Send to all leads →").
+        setResult({ started: true, name: form.name, total: res.snapshot?.count ?? recipientCount, sentNow: 0, runId: res.run.id, campaignId: camp.campaign.id, wasTest: true });
+      } else {
+        // Real send → go straight to the live run monitor. No lingering Send
+        // button to accidentally re-click while the workflow drains in the background.
+        router.push(`/runs?run=${res.run.id}`);
+      }
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   // After a test send, launch a FULL-audience run of the SAME campaign (reuses
