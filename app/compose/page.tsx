@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText, Images } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
-import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets, useCreateEngineCampaign, useCreateRun } from '@/lib/hooks';
+import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets, useCreateEngineCampaign, useCreateRun, useEngineCampaigns } from '@/lib/hooks';
 import { plainToHtml } from '@/lib/markdown';
 import type { Lead, Attachment, Asset } from '@/lib/api';
 
@@ -136,6 +136,7 @@ function ComposeInner() {
   // Converged: Compose now launches a durable ENGINE run.
   const createEngineCampaign = useCreateEngineCampaign();
   const createRun = useCreateRun();
+  const { data: engineCampsData } = useEngineCampaigns(); // existing names → compute "copy N"
   const test = useTestSend();
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
@@ -231,8 +232,14 @@ function ComposeInner() {
     if (!fromCampaign || prefilled.current) return;
     prefilled.current = true;
     const c = fromCampaign;
+    // Duplicates get a clear, incrementing "<base> copy N" name (base = strip any
+    // existing " copy N" / " (copy)"), scanning existing engine campaigns for the
+    // next free N. Each copy also carries a unique #id tag on the Runs list.
+    const base = (c.name || 'Campaign').replace(/ copy \d+$/i, '').replace(/ \(copy\)$/i, '').trim();
+    const existingNames = (engineCampsData?.campaigns || []).map((x: any) => x.name || '');
+    let copyN = 1; while (existingNames.includes(`${base} copy ${copyN}`)) copyN++;
     setForm({
-      name: c.status === 'draft' ? c.name : `${c.name} (copy)`,
+      name: c.status === 'draft' ? c.name : `${base} copy ${copyN}`,
       fromName: c.fromName || '',
       replyTo: c.replyTo || '',
       subject: toFriendly(c.subject || ''),

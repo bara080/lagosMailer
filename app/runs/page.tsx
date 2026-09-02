@@ -120,7 +120,11 @@ function RunsInner() {
               campaigns.map((c) => (
                 <button key={c.id} className={`pick-card ${activeCampaign === c.id ? 'sel' : ''}`} style={{ padding: '10px 12px' }} onClick={() => { setSelected(c.id); setOpenRun(null); }}>
                   <span className="pick-ic" style={{ width: 30, height: 30 }}><Layers size={14} /></span>
-                  <span className="pick-title" style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{c.name}</span>
+                  {/* Name + short id tag — distinguishes same-named copies (e.g. two "… (copy)"). */}
+                  <span style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <span className="pick-title" style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span className="faint" style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace' }}>#{c.id.slice(0, 8)}</span>
+                  </span>
                   {activeCampaign === c.id && <Check size={15} color="var(--accent)" />}
                 </button>
               ))}
@@ -131,7 +135,10 @@ function RunsInner() {
         <div className="stack gap16">
           <div className="card pad">
             <div className="row between">
-              <h3 style={{ margin: 0 }}>{campaigns.find((c) => c.id === activeCampaign)?.name || 'Runs'}</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                {campaigns.find((c) => c.id === activeCampaign)?.name || 'Runs'}
+                {activeCampaign && <span className="faint" style={{ fontSize: 12, fontFamily: 'ui-monospace, monospace', fontWeight: 400 }}>#{activeCampaign.slice(0, 8)}</span>}
+              </h3>
               <div className="row gap8">
                 {activeCampaign && (
                   <button className="btn ghost sm" disabled={delCampaign.isPending} onClick={async () => {
