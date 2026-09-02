@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Rocket, Pause, Play, StopCircle, RotateCcw, Layers, Check, AlertCircle, X, Folder, FilePlus2, Users, UserCheck, CalendarClock } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, EmptyState, Modal, Stepper } from '@/components/ui';
@@ -50,7 +51,9 @@ function ProgressBar({ total, accepted, failed, suppressed }: { total: number; a
   );
 }
 
-export default function RunsPage() {
+function RunsInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const { data: config } = useConfig();
   const { data: campData, isLoading } = useEngineCampaigns();
   const campaigns = campData?.campaigns ?? [];
@@ -62,6 +65,19 @@ export default function RunsPage() {
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
+  const [launchStep, setLaunchStep] = useState(0);
+
+  // Bridge: /runs?launch=<engineCampaignId> (from "Launch as run" on Compose)
+  // opens the wizard on the Audience step with that campaign pre-selected.
+  useEffect(() => {
+    const launch = sp.get('launch');
+    if (launch) {
+      setSelected(launch);
+      setLaunchStep(1);
+      setShowLaunch(true);
+      router.replace('/runs'); // strip the param so it doesn't re-open
+    }
+  }, [sp, router]);
   const { data: quota } = useEngineQuota();
   const quotaLimit = quota?.limit ?? config?.dailyCap ?? 1900;
   const quotaPct = Math.min(100, Math.round(((quota?.accepted ?? 0) / Math.max(1, quotaLimit)) * 100));
@@ -105,7 +121,7 @@ export default function RunsPage() {
           <div className="card pad">
             <div className="row between">
               <h3 style={{ margin: 0 }}>{campaigns.find((c) => c.id === activeCampaign)?.name || 'Runs'}</h3>
-              <button className="btn" onClick={() => setShowLaunch(true)}><Rocket size={15} /> Launch run</button>
+              <button className="btn" onClick={() => { setLaunchStep(0); setShowLaunch(true); }}><Rocket size={15} /> Launch run</button>
             </div>
             {!activeCampaign ? <EmptyState title="Select a campaign" hint="Pick a campaign on the left, or create one." /> :
               runs.length === 0 ? <p className="faint mt12" style={{ fontSize: 13 }}>No runs yet. Launch one to start sending.</p> : (
@@ -148,9 +164,13 @@ export default function RunsPage() {
       )}
 
       {showNew && <NewCampaignModal senders={config?.senders ?? []} defaultProvider={config?.emailProvider ?? 'smtp'} onClose={() => setShowNew(false)} />}
-      {showLaunch && <LaunchWizard campaignId={activeCampaign} companyName={config?.company || ''} onClose={() => setShowLaunch(false)} onLaunched={(runId) => { setShowLaunch(false); setSelected(null); setOpenRun(runId); }} />}
+      {showLaunch && <LaunchWizard campaignId={activeCampaign} companyName={config?.company || ''} startStep={launchStep} onClose={() => setShowLaunch(false)} onLaunched={(runId) => { setShowLaunch(false); setSelected(null); setOpenRun(runId); }} />}
     </>
   );
+}
+
+export default function RunsPage() {
+  return <Suspense fallback={<div className="page"><div className="skeleton" style={{ height: 200 }} /></div>}><RunsInner /></Suspense>;
 }
 
 // ── New campaign (content + sender + provider) ───────────────────────────────
@@ -209,8 +229,8 @@ function NewCampaignModal({ senders, defaultProvider, onClose }: { senders: stri
 // ── Launch wizard: Campaign → Audience → Cadence → Delivery → Review ─────────
 const WIZARD_STEPS = ['Campaign', 'Audience', 'Cadence', 'Delivery', 'Review'];
 
-function LaunchWizard({ campaignId: initialCampaignId, companyName, onClose, onLaunched }: {
-  campaignId: string | null; companyName: string; onClose: () => void; onLaunched: (runId: string) => void;
+function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 0, onClose, onLaunched }: {
+  campaignId: string | null; companyName: string; startStep?: number; onClose: () => void; onLaunched: (runId: string) => void;
 }) {
   const { data: config } = useConfig();
   const { data: campData } = useEngineCampaigns();
@@ -220,7 +240,7 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, onClose, onL
   const senders = config?.senders ?? [];
   const dailyCap = config?.dailyCap ?? 1900;
 
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(startStep);
   const [source, setSource] = useState<'existing' | 'fresh'>(initialCampaignId || campaigns.length ? 'existing' : 'fresh');
   const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId);
   const [fresh, setFresh] = useState({ name: 'New campaign', senderKey: senders[0] || '', provider: config?.emailProvider || 'smtp', subject: '', message: '', replyTo: '' });

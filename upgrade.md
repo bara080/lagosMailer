@@ -60,23 +60,42 @@ Campaign runs are durable rows; dedup + atomic quota are real. All tested E2E.
 - [x] Provider per-version (Gmail SMTP / Resend); unsubscribe + suppression in the send path.
 - [x] Audience modes coded: `all | segment | explicit | remaining | previous_run | failed_only` (explicit tested live).
 - Verified live: snapshot+dedup, atomic quota (`reserved`/`accepted`), real Resend send, queued→running→completed.
-- NOT yet: UI wiring (compose→engine, run detail page), live pause/resume + remaining/failed modes, concurrency load test.
 
-### Phase 2 — control + audit
-Pause/resume/stop on the run, `campaign_events` timeline, retry-failed, per-run history UI.
+### ✅ Phase 2 — control + audit (DONE 2026-09-02)
+- [x] Pause / resume / stop / **continue** run controls (`/api/engine/runs/[runId]/control`).
+- [x] `campaign_events` timeline + retry-failed (audienceMode `failed_only`, sourceRunId).
+- [x] Client: `/runs` page + hooks; live polling while active.
+- [x] **5-step Launch wizard** (Campaign → Audience → Cadence → Delivery → Review) + reusable `<Stepper>`.
+- [x] **Full run monitor page** — daily-quota header, `% complete`, metric tiles, **cadence stage cards**,
+      Activity / Recipients / Run-settings tabs (`getRunDetail` + `run_stage_counts`/`campaign_run_counts`/`listRecipients`/`quotaToday`).
 
-### Phase 3 — controlled concurrency
-Enable N active runs per company; fair round-robin dispatch; crash/redeploy recovery tests.
+### ✅ Cadence + stage gates (DONE 2026-09-02)
+- [x] Cadence = `stage_plan` limits → `assign_stages` RPC tags recipients per stage; `drainChunk` sends only the
+      current stage, then advances. Verified `Test 1 / Canary 2 / remainder` → `{1:1, 2:2, 3:3}`.
+- [x] **Stage gates:** a `gate:'manual'` stage HOLDS the run at status `gated`; operator **Continue** releases the
+      next stage. Verified `stage1→gated→continue→stage2→gated→continue→done`.
 
-### Phase 4 — deliverability
-Resend webhooks → delivered/bounced/complained ledger; suppression on bounce/complaint;
-stage health-gates (canary 200 → ramp 1,000 → remainder).
+### ✅ Phase 4 — deliverability (DONE 2026-09-02)
+- [x] `/api/webhooks/resend` — Svix signature verify (zero-dep HMAC, validated vs the real `whsec_` secret),
+      idempotent via `provider_events`.
+- [x] `ingestProviderEvent` — matches recipient by `provider_message_id`, stamps `delivered_at`/`bounced_at`/
+      `complained_at` (delivery is SEPARATE from send `status` → delivered ≤ accepted), auto-suppresses
+      bounces/complaints (excluded from future snapshots). Verified `accepted 2 · delivered 1 · bounced 1`.
+- [x] Monitor **Delivered** tile is real; Failed rolls in bounces.
+- [ ] Env to activate: `RESEND_WEBHOOK_SECRET` (+ webhook added in Resend dashboard) — set locally; needs Vercel + deploy.
+- [ ] Stage HEALTH-gates (auto-gate on bounce/complaint thresholds) — still manual-only.
 
-### Phase 5 — cutover
-Make relational tables authoritative; retire the KV campaign/queue path + the every-minute cron.
+### ~ Phase 3 — controlled concurrency (PARTIAL)
+- [x] Atomic shared quota (`reserve_quota` locks the bucket) — concurrent runs already can't exceed the cap.
+- [ ] Weighted round-robin fair scheduler (only matters meaningfully past 1,900/day).
+
+### Phase 5 — cutover (PENDING)
+- [ ] **Compose → engine convergence** (one send path); make relational tables authoritative; comment out
+      (don't delete) the legacy KV campaign/queue path + every-minute cron once proven.
 
 ---
 
 ## Status
-- Plan: this file.
-- Next artifact: `supabase/campaign-engine.sql` (Phase 1 schema) → run it, then wire the snapshot + run API + per-run workflow.
+Engine spec is built end-to-end (relational ledger → concurrency-safe quota → cadence → gates → wizard →
+monitor → delivery webhooks + suppression), all verified via node/MCP + `next build`. Remaining: activate
+webhooks in prod (env + deploy), Compose→engine convergence, and the fair scheduler.

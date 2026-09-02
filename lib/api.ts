@@ -179,6 +179,8 @@ export const api = {
 
   // ── Campaign job engine ────────────────────────────────────────────────────
   engineCampaigns: () => req<{ campaigns: EngineCampaign[] }>('/api/engine/campaigns'),
+  // Bridge: clone a legacy Compose campaign into an engine campaign (to launch as a run).
+  importCampaign: (id: number) => req<{ campaign: EngineCampaign; version: any }>('/api/engine/import-campaign', { method: 'POST', body: JSON.stringify({ id }) }),
   createEngineCampaign: (body: { name: string; subject: string; html: string; text: string; senderKey?: string; providerKey?: string; replyTo?: string; attachments?: Attachment[] }) =>
     req<{ campaign: EngineCampaign; version: any }>('/api/engine/campaigns', { method: 'POST', body: JSON.stringify(body) }),
   engineRuns: (campaignId: string) => req<{ runs: EngineRun[] }>(`/api/engine/campaigns/${campaignId}/runs`),

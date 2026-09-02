@@ -211,6 +211,10 @@ export function useRunRecipients(runId: string | null, params: { page?: number; 
 export function useEngineQuota() {
   return useQuery({ queryKey: ['engine-quota'], queryFn: api.engineQuota, refetchInterval: 5000 });
 }
+export function useImportCampaign() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api.importCampaign(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['engine-campaigns'] }) });
+}
 export function useCreateEngineCampaign() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: api.createEngineCampaign, onSuccess: () => qc.invalidateQueries({ queryKey: ['engine-campaigns'] }) });

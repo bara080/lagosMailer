@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy } from 'lucide-react';
+import { Send, CheckCircle2, FileEdit, Clock, PauseCircle, Layers, Plus, Search, Filter, Play, Eye, MoreVertical, Pause, StopCircle, X, Paperclip, Copy, Rocket } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useCampaigns, useSendCampaign, useControlCampaign } from '@/lib/hooks';
+import { useCampaigns, useSendCampaign, useControlCampaign, useImportCampaign } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import type { Campaign } from '@/lib/api';
 
@@ -26,6 +26,7 @@ export default function CampaignsPage() {
   const { data, isLoading } = useCampaigns();
   const send = useSendCampaign();
   const control = useControlCampaign();
+  const importCampaign = useImportCampaign();
   const confirm = useConfirm();
   const [menu, setMenu] = useState<number | null>(null);
   const [viewing, setViewing] = useState<Campaign | null>(null); // view campaign content (sent or draft)
@@ -123,6 +124,9 @@ export default function CampaignsPage() {
                                 <div className="menu-pop" style={{ right: 0, left: 'auto' }}>
                                   <button className="mi" onClick={() => { router.push(`/compose?from=${c.id}`); setMenu(null); }}>
                                     {c.status === 'draft' ? <><FileEdit size={15} /> Edit in Compose</> : <><Copy size={15} /> Duplicate & edit</>}
+                                  </button>
+                                  <button className="mi" disabled={importCampaign.isPending} onClick={async () => { setMenu(null); try { const eng = await importCampaign.mutateAsync(c.id); router.push(`/runs?launch=${eng.campaign.id}`); } catch (e: any) { alert(e.message); } }}>
+                                    <Rocket size={15} /> Launch as run
                                   </button>
                                   {c.status === 'sending' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'pause' }); setMenu(null); }}><Pause size={15} /> Pause</button>}
                                   {c.status === 'paused' && <button className="mi" onClick={() => { control.mutate({ id: c.id, action: 'resume' }); setMenu(null); }}><Play size={15} /> Resume</button>}
