@@ -206,9 +206,11 @@ function ComposeInner() {
   const [customEmails, setCustomEmails] = useState('');
   const [limit, setLimit] = useState('');
   const [fromAddress, setFromAddress] = useState(''); // chosen "send from" (empty = company default)
+  const [provider, setProvider] = useState(''); // chosen ESP for this send (empty = company default)
   const [skipEmailed, setSkipEmailed] = useState(true); // rolling batches: don't re-email leads
   const senders = config?.senders ?? [];
   const effectiveFrom = fromAddress || config?.from || '';
+  const effectiveProvider = provider || config?.emailProvider || 'smtp'; // per-send ESP wins over the company default
 
   // Prefill from an existing campaign (?from=<id>). A draft edits IN PLACE; any
   // other status loads as a reusable copy. Runs once when the campaign arrives.
@@ -312,7 +314,7 @@ function ComposeInner() {
       html: plainToHtml(toBackend(form.message)),
       text: toBackend(form.message),
       senderKey: fromLine,
-      providerKey: config?.emailProvider,
+      providerKey: effectiveProvider,
       replyTo: form.replyTo,
       attachments,
     });
@@ -442,11 +444,20 @@ function ComposeInner() {
             <div className="card pad">
               <h3 style={{ marginTop: 0 }}>Email settings</h3>
               <label className="field mt12"><span>Campaign name</span><input className="input" value={form.name} onChange={set('name')} /></label>
-              <label className="field mt12"><span>Send from</span>
-                <select className="input" value={effectiveFrom} onChange={(e) => setFromAddress(e.target.value)}>
-                  {senders.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </label>
+              <div className="row gap12 mt12">
+                <label className="field grow"><span>Send from</span>
+                  <select className="input" value={effectiveFrom} onChange={(e) => setFromAddress(e.target.value)}>
+                    {senders.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                {/* Per-send ESP: overrides the company default so a single campaign can go via Resend or Gmail. */}
+                <label className="field grow"><span>Delivery</span>
+                  <select className="input" value={effectiveProvider} onChange={(e) => setProvider(e.target.value)}>
+                    <option value="smtp">Gmail (SMTP)</option>
+                    <option value="resend">Resend</option>
+                  </select>
+                </label>
+              </div>
               <div className="row gap12 mt12">
                 <label className="field grow"><span>From name</span><input className="input" value={form.fromName} onChange={set('fromName')} placeholder="Native Harlem" /></label>
                 <label className="field grow"><span>Reply-To</span><input className="input" value={form.replyTo} onChange={set('replyTo')} placeholder="support@…" /></label>
