@@ -318,7 +318,17 @@ function ComposeInner() {
     });
     const audienceMode = mode === 'custom' ? 'explicit' : 'segment';
     const res = await createRun.mutateAsync({ campaignId: camp.campaign.id, body: { audienceMode, audienceFilter: audience, dispatchChunkSize: 50 } });
-    setResult({ started: true, name: form.name, total: res.snapshot?.count ?? recipientCount, sentNow: res.first?.sentNow ?? 0, done: res.first?.done, runId: res.run.id });
+    // Keep the campaign id + whether this was a test so the result screen can
+    // offer "Send to all leads" — reuse the same frozen content, new audience.
+    setResult({ started: true, name: form.name, total: res.snapshot?.count ?? recipientCount, sentNow: res.first?.sentNow ?? 0, done: res.first?.done, runId: res.run.id, campaignId: camp.campaign.id, wasTest: mode === 'custom' });
+  }
+
+  // After a test send, launch a FULL-audience run of the SAME campaign (reuses
+  // the frozen content — no re-compose, no duplicate campaign).
+  async function sendToAll() {
+    if (!result?.campaignId) return;
+    const res = await createRun.mutateAsync({ campaignId: result.campaignId, body: { audienceMode: 'all', audienceFilter: {} } });
+    router.push(`/runs?run=${res.run.id}`);
   }
 
   return (
@@ -569,14 +579,19 @@ function ComposeInner() {
               </div>
               {result && (
                 <div className="card pad">
-                  <h3 style={{ marginTop: 0 }}>Run launched</h3>
-                  <p style={{ color: 'var(--green)' }}>✓ Sending to <b>{result.total?.toLocaleString?.() ?? result.total}</b> recipient(s).</p>
+                  <h3 style={{ marginTop: 0 }}>{result.wasTest ? 'Test run launched' : 'Run launched'}</h3>
+                  <p style={{ color: 'var(--green)' }}>✓ Sending to <b>{result.total?.toLocaleString?.() ?? result.total}</b> {result.wasTest ? 'test address(es)' : 'recipient(s)'}.</p>
                   <p className="muted" style={{ fontSize: 13 }}>
-                    {result.done
-                      ? 'All sent.'
-                      : `${result.sentNow ?? 0} sent so far — the rest drains in the background (atomic daily cap). Safe to close this tab; watch live progress on the run monitor.`}
+                    {result.wasTest
+                      ? 'Happy with the test? Send the SAME content to your full lead list — a new run, no re-compose.'
+                      : result.done ? 'All sent.' : `${result.sentNow ?? 0} sent so far — the rest drains in the background (atomic daily cap). Safe to close this tab; watch live progress on the run monitor.`}
                   </p>
-                  <button className="btn mt12" onClick={() => router.push(`/runs?run=${result.runId}`)}>View run →</button>
+                  <div className="row gap8 mt12">
+                    <button className="btn ghost" onClick={() => router.push(`/runs?run=${result.runId}`)}>View run →</button>
+                    {result.wasTest && (
+                      <button className="btn" disabled={createRun.isPending} onClick={sendToAll}><Zap size={15} /> Send to all leads →</button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -66,6 +66,11 @@ function RunsInner() {
   const [showNew, setShowNew] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
   const [launchStep, setLaunchStep] = useState(0);
+  const RUNS_PER_PAGE = 8;
+  const [runPage, setRunPage] = useState(1);
+  useEffect(() => { setRunPage(1); }, [activeCampaign]);
+  const runPageCount = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
+  const pagedRuns = runs.slice((runPage - 1) * RUNS_PER_PAGE, runPage * RUNS_PER_PAGE);
 
   // Bridge: /runs?launch=<engineCampaignId> (from "Launch as run" on Compose)
   // opens the wizard on the Audience step with that campaign pre-selected.
@@ -128,7 +133,7 @@ function RunsInner() {
             {!activeCampaign ? <EmptyState title="Select a campaign" hint="Pick a campaign on the left, or create one." /> :
               runs.length === 0 ? <p className="faint mt12" style={{ fontSize: 13 }}>No runs yet. Launch one to start sending.</p> : (
               <div className="stack gap10 mt12">
-                {runs.map((r) => {
+                {pagedRuns.map((r) => {
                   const pr = r.progress || { total: r.audience_count, accepted: 0, failed: 0, pending: r.audience_count, suppressed: 0 };
                   const total = pr.total || r.audience_count || 0;
                   const doneN = pr.accepted + pr.failed + pr.suppressed;
@@ -158,6 +163,16 @@ function RunsInner() {
                     </div>
                   );
                 })}
+                {runs.length > RUNS_PER_PAGE && (
+                  <div className="row between" style={{ paddingTop: 8 }}>
+                    <span className="faint" style={{ fontSize: 12 }}>{runs.length.toLocaleString()} runs</span>
+                    <span className="row gap8">
+                      <button className="btn ghost sm" disabled={runPage <= 1} onClick={() => setRunPage(runPage - 1)}>← Prev</button>
+                      <span className="faint" style={{ fontSize: 12 }}>Page {runPage} / {runPageCount}</span>
+                      <button className="btn ghost sm" disabled={runPage >= runPageCount} onClick={() => setRunPage(runPage + 1)}>Next →</button>
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
