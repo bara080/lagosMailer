@@ -22,6 +22,8 @@ GuestCenter__1237165_2026-09-16_1531.csv
 # Local scratch notes & docs — ignore all markdown except the project README
 *.md
 !README.md
+# Secrets/config docs (hold app passwords, DNS, keys) — never commit.
+lagosnyc.md
 .agents/
 .claude/
 skills-lock.json
