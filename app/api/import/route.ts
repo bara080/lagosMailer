@@ -3,6 +3,7 @@ import * as store from '@/src/store.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // large imports scan all existing emails for dedup
 
 // Minimal CSV parser (quoted fields + embedded commas/newlines).
 function parseCsv(txt: string) {
@@ -31,5 +32,10 @@ function parseCsv(txt: string) {
 export async function POST(req: NextRequest) {
   const company = req.headers.get('x-company') || 'LagosTSQ';
   const body = await req.json();
-  return NextResponse.json(await store.importCsv(company, parseCsv(body.csv || '')));
+  // Accept either pre-parsed `rows` (from the client-side CSV/Excel parser) or a
+  // raw `csv` string (paste box / legacy callers). `dryRun` returns the
+  // validation+dedup preview without writing.
+  const rows = Array.isArray(body.rows) ? body.rows : parseCsv(body.csv || '');
+  if (body.dryRun) return NextResponse.json(await store.previewImport(company, rows));
+  return NextResponse.json(await store.importCsv(company, rows));
 }

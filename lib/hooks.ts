@@ -61,6 +61,24 @@ export function useImportCsv() {
   });
 }
 
+// Dry-run: preview validation + dedup outcomes for a parsed CSV/Excel file (no writes).
+export function usePreviewImport() {
+  return useMutation({ mutationFn: (rows: Record<string, string>[]) => api.previewImport(rows) });
+}
+
+// Commit an upload (pre-parsed rows) — inserts only the net-new, deduped leads.
+export function useImportRows() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rows: Record<string, string>[]) => api.importRows(rows),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+      qc.invalidateQueries({ queryKey: ['validation-counts'] });
+    },
+  });
+}
+
 export function useValidationCounts() {
   return useQuery({ queryKey: ['validation-counts'], queryFn: api.validationCounts });
 }

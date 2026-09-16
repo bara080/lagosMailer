@@ -6,6 +6,11 @@ out/
 sent-log.csv
 recipients.csv
 data/
+
+# Real guest/lead exports (PII) — never commit. Keep the example CSV only.
+GuestCenter*.csv
+GuestCenter__1237165_2026-09-16_1531.csv
+!recipients.example.csv
 .DS_Store
 
 # Test/browser artifacts
@@ -13,7 +18,7 @@ data/
 *.png
 .vercel
 .env*
-
+.GuestCenter__1237165_2026-09-16_1531.csv
 # Local scratch notes & docs — ignore all markdown except the project README
 *.md
 !README.md

@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet, ShieldCheck } from 'lucide-react';
+import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet, ShieldCheck, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StageBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useAddLead, useConfig, useDeleteLead, useImportCsv, useLeads, useSyncSheet, useUpdateLead, useValidationCounts, useValidateLeads, useRemoveInvalidLeads } from '@/lib/hooks';
+import { useAddLead, useConfig, useDeleteLead, useLeads, useSyncSheet, useUpdateLead, useValidationCounts, useValidateLeads, useRemoveInvalidLeads, usePreviewImport, useImportRows } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
-import type { Lead } from '@/lib/api';
+import type { Lead, ImportStats } from '@/lib/api';
 
 const TABS = [
   { key: 'all', label: 'All' }, { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' },
@@ -254,27 +254,189 @@ function AddLeadModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Header aliases the server's importer understands (src/store.js `pick`). We keep
+// only these columns from an uploaded file so the JSON payload stays small even
+// for a 90k-row export with dozens of unrelated columns (spend, visits, notes…).
+const RECOGNIZED_COLUMNS = new Set([
+  'email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail',
+  'instagram', 'ig', 'handle', 'instagram handle',
+  'business', 'business_name', 'business name', 'company', 'company name', 'organization',
+  'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name', 'guest name', 'guest',
+  'phone', 'phone number', 'mobile', 'tel', 'telephone',
+  'website', 'url', 'site', 'web',
+  'category', 'type', 'vertical',
+  'borough', 'city', 'area', 'location',
+  'source', 'subject',
+]);
+
+type ImpStep = 'pick' | 'preview' | 'validating' | 'done';
+
+// Non-developer upload layer: drop a CSV or Excel file → validation + dedup
+// preview → import only the net-new → auto-run the MX validation pass.
 function ImportModal({ onClose }: { onClose: () => void }) {
-  const imp = useImportCsv();
-  const [csv, setCsv] = useState('email,name,business,category\n');
+  const preview = usePreviewImport();
+  const importRows = useImportRows();
+  const validate = useValidateLeads();
+
+  const [step, setStep] = useState<ImpStep>('pick');
+  const [fileName, setFileName] = useState('');
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [stats, setStats] = useState<ImportStats | null>(null);
+  const [added, setAdded] = useState(0);
+  const [vRun, setVRun] = useState<{ checked: number; remaining: number } | null>(null);
+  const [err, setErr] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+
+  async function handleFile(file: File) {
+    setErr('');
+    try {
+      const XLSX = await import('xlsx'); // lazy — keeps SheetJS out of the initial bundle
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
+      if (!raw.length) { setErr('That file has no data rows.'); return; }
+      // Lowercase/trim header keys (mirrors the server CSV parser) and keep only
+      // recognized columns so `pick()` matches and the payload stays lean.
+      const kept = new Set<string>();
+      const norm = raw.map((r) => {
+        const o: Record<string, string> = {};
+        for (const k of Object.keys(r)) {
+          const key = k.trim().toLowerCase();
+          if (RECOGNIZED_COLUMNS.has(key)) { o[key] = String(r[k] ?? '').trim(); kept.add(key); }
+        }
+        return o;
+      });
+      if (!kept.size) {
+        setErr('No recognizable columns found. Need at least an Email (or Instagram) column.');
+        return;
+      }
+      setFileName(file.name);
+      setRows(norm);
+      setColumns([...kept]);
+      const s = await preview.mutateAsync(norm); // dry-run: no writes
+      setStats(s);
+      setStep('preview');
+    } catch (e: any) {
+      setErr(e?.message || 'Could not read that file.');
+    }
+  }
+
+  async function runImport() {
+    try {
+      const r = await importRows.mutateAsync(rows);
+      setAdded(r.added);
+      // Auto-run the deliverability (MX) validation pass on the freshly-added leads.
+      setStep('validating');
+      let acc = { checked: 0, remaining: 0 };
+      for (let i = 0; i < 200; i++) { // safety bound
+        const v = await validate.mutateAsync(2000);
+        acc = { checked: acc.checked + v.checked, remaining: v.remaining };
+        setVRun({ ...acc });
+        if (v.done || v.checked === 0) break;
+      }
+      setStep('done');
+    } catch (e: any) {
+      setErr(e?.message || 'Import failed.');
+      setStep('preview');
+    }
+  }
+
+  const busy = preview.isPending || importRows.isPending;
+
   return (
-    <Modal title="Import leads (CSV)" onClose={onClose}>
-      <p className="muted" style={{ fontSize: 12 }}>Paste CSV with a header row. Recognized columns: email, name, business, category, phone, instagram, website, source.</p>
-      <textarea className="input mt8" style={{ minHeight: 160, fontFamily: 'monospace', fontSize: 12 }} value={csv} onChange={(e) => setCsv(e.target.value)} />
-      <div className="row right mt16 gap8">
-        <button className="btn ghost" onClick={onClose}>Cancel</button>
-        <button className="btn" disabled={imp.isPending} onClick={async () => {
-          const r = await imp.mutateAsync(csv); alert(`Imported ${r.added} lead(s).`); onClose();
-        }}>Import</button>
-      </div>
+    <Modal title="Import leads" onClose={onClose} width={480}>
+      {step === 'pick' && (
+        <>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Drop a <b>CSV</b> or <b>Excel</b> file (.csv, .xlsx). We auto-detect columns like
+            Email, Guest Name, Phone, Company — then show you what's new vs. already in your list before importing.
+          </p>
+          <label
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}
+            className="mt12"
+            style={{
+              display: 'grid', placeItems: 'center', gap: 8, padding: '28px 16px', cursor: 'pointer',
+              border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 12,
+              background: dragOver ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent',
+              textAlign: 'center',
+            }}
+          >
+            {preview.isPending ? <Loader2 size={22} className="spin" /> : <FileSpreadsheet size={22} color="var(--accent)" />}
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{preview.isPending ? 'Analyzing…' : 'Click to choose or drag a file here'}</span>
+            <span className="faint" style={{ fontSize: 12 }}>CSV or Excel · headers in the first row</span>
+            <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              style={{ display: 'none' }} disabled={preview.isPending}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+          </label>
+          {err && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{err}</p>}
+        </>
+      )}
+
+      {step === 'preview' && stats && (
+        <>
+          <p className="muted" style={{ fontSize: 12 }}>
+            <b>{fileName}</b> · {stats.total.toLocaleString()} rows · columns: {columns.join(', ')}
+          </p>
+          <div className="mt12" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Stat label="New to import" value={stats.netNew} tone="good" big />
+            <Stat label="Already in list" value={stats.duplicate} />
+            <Stat label="Duplicate in file" value={stats.inFileDup} />
+            <Stat label="Invalid email" value={stats.invalid} tone={stats.invalid ? 'warn' : undefined} />
+            <Stat label="Blank (no email)" value={stats.blank} />
+          </div>
+          {stats.netNew === 0 && <p className="muted mt12" style={{ fontSize: 12 }}>Nothing new to add — every valid email is already in your list. 🎉</p>}
+          {err && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{err}</p>}
+          <div className="row right mt16 gap8">
+            <button className="btn ghost" onClick={() => { setStep('pick'); setStats(null); setErr(''); }} disabled={busy}>Back</button>
+            <button className="btn" disabled={busy || stats.netNew === 0} onClick={runImport}>
+              {importRows.isPending ? 'Importing…' : `Import ${stats.netNew.toLocaleString()} new`}
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 'validating' && (
+        <div style={{ display: 'grid', placeItems: 'center', gap: 10, padding: '24px 8px', textAlign: 'center' }}>
+          <Loader2 size={22} className="spin" color="var(--accent)" />
+          <b style={{ fontSize: 14 }}>Added {added.toLocaleString()} — validating emails…</b>
+          <span className="faint" style={{ fontSize: 12 }}>
+            {vRun ? `${vRun.checked.toLocaleString()} checked · ${vRun.remaining.toLocaleString()} left` : 'Starting…'}
+          </span>
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div style={{ display: 'grid', placeItems: 'center', gap: 10, padding: '24px 8px', textAlign: 'center' }}>
+          <CheckCircle2 size={26} color="var(--accent)" />
+          <b style={{ fontSize: 15 }}>Imported {added.toLocaleString()} new lead(s)</b>
+          <span className="faint" style={{ fontSize: 12 }}>Emails validated (syntax + MX). Invalid ones are flagged in Email health.</span>
+          <button className="btn mt8" onClick={onClose}>Done</button>
+        </div>
+      )}
     </Modal>
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Stat({ label, value, tone, big }: { label: string; value: number; tone?: 'good' | 'warn'; big?: boolean }) {
+  const color = tone === 'good' ? 'var(--accent)' : tone === 'warn' ? 'var(--red)' : 'var(--text)';
+  return (
+    <div className="card" style={{ padding: '10px 12px', gridColumn: big ? '1 / -1' : undefined }}>
+      <div style={{ fontSize: big ? 26 : 18, fontWeight: 700, color }}>{value.toLocaleString()}</div>
+      <div className="faint" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {tone === 'warn' && value > 0 && <AlertTriangle size={11} />}{label}
+      </div>
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose, width = 440 }: { title: string; children: React.ReactNode; onClose: () => void; width?: number }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'grid', placeItems: 'center', zIndex: 50 }} onClick={onClose}>
-      <div className="card pad" style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
+      <div className="card pad" style={{ width, maxWidth: '92vw' }} onClick={(e) => e.stopPropagation()}>
         <div className="row between"><h3 style={{ margin: 0 }}>{title}</h3>
           <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose}><X size={14} /></button></div>
         {children}

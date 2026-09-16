@@ -23,6 +23,9 @@ export interface Lead {
 
 export type Counts = Record<string, number>;
 
+// Outcome tally from the import validation + dedup pass (see src/store.js prepareImport).
+export interface ImportStats { total: number; blank: number; invalid: number; duplicate: number; inFileDup: number; netNew: number; }
+
 // An uploaded asset (bytes in Vercel Blob, metadata in Supabase).
 export interface Asset { id: number; url: string; name: string; contentType: string; size: number; at: string; }
 // An asset attached to a campaign. `inline` images render in the body; others
@@ -166,6 +169,12 @@ export const api = {
   updateLead: (id: number, body: Partial<Lead>) => req<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteLead: (id: number) => req<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' }),
   importCsv: (csv: string) => req<{ added: number }>('/api/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  // Upload flow: send pre-parsed rows (from a CSV/Excel file). `dryRun` returns
+  // the validation + dedup preview (net-new vs duplicate/invalid/blank) with no writes.
+  previewImport: (rows: Record<string, string>[]) =>
+    req<ImportStats>('/api/import', { method: 'POST', body: JSON.stringify({ rows, dryRun: true }) }),
+  importRows: (rows: Record<string, string>[]) =>
+    req<{ added: number } & ImportStats>('/api/import', { method: 'POST', body: JSON.stringify({ rows }) }),
   // Email list validation (syntax + MX). counts (GET) + validate a batch (POST, loop until done).
   validationCounts: () => req<{ valid: number; invalid: number; risky_relay: number; unchecked: number }>('/api/leads/validate'),
   validateLeads: (limit?: number) => req<{ checked: number; valid: number; invalid: number; risky_relay: number; remaining: number; done: boolean }>('/api/leads/validate', { method: 'POST', body: JSON.stringify({ limit }) }),

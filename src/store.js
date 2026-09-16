@@ -253,25 +253,48 @@ function pick(r, ...aliases) {
   return '';
 }
 
-// Import rows (from CSV or Google Sheets). Tolerant of common header names, e.g.
-// "Email Address", "Full Name", "Company", "Phone Number".
-export async function importCsv(company, rows) {
+// Basic email-syntax gate for the import input-validation layer. Not a
+// deliverability check (that's the MX pass below) — just kills obviously
+// malformed addresses before they ever reach the table.
+const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Shared import pipeline: reads a batch of raw rows, applies the input-validation
+// layer (syntax) + dedup (vs the DB and within the batch), and returns the rows
+// ready to insert plus a per-outcome tally. Used by BOTH previewImport (dry-run,
+// no writes) and importCsv (writes), so the counts a user sees in the preview
+// EXACTLY match what the real import will do.
+//
+// Outcomes (each raw row lands in exactly one bucket):
+//   blank      — no email AND no instagram → nothing to key on
+//   invalid    — has an email but it fails syntax → skipped (input validation)
+//   duplicate  — email already exists for this company (case-insensitive)
+//   inFileDup  — email repeats earlier in this same file
+//   netNew     — passes all gates → queued for insert
+async function prepareImport(company, rows) {
   const sb = getSupabase();
   // Existing emails (email column only) → dedup set. Fast, slim scan.
   const existing = await fetchAllRows(() => sb.from(LEADS).select('email').eq('company', company).neq('email', ''));
   const seen = new Set(existing.map((r) => String(r.email || '').toLowerCase()));
+  const inFile = new Set();
   let id = await nextLeadId(company);
   const now = new Date().toISOString();
   const toInsert = [];
+  const stats = { total: 0, blank: 0, invalid: 0, duplicate: 0, inFileDup: 0, netNew: 0 };
   for (const r of rows) {
+    // Skip a fully-empty row (trailing blank line, etc.) without counting it.
+    if (!r || !Object.values(r).some((v) => String(v ?? '').trim())) continue;
+    stats.total++;
     const email = pick(r, 'email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail');
     const instagram = pick(r, 'instagram', 'ig', 'handle', 'instagram handle');
-    if (!email && !instagram) continue;
+    if (!email && !instagram) { stats.blank++; continue; }
     if (email) {
       const key = email.toLowerCase();
-      if (seen.has(key)) continue; // dedup vs existing + within this import
-      seen.add(key);
+      if (!EMAIL_SYNTAX_RE.test(key)) { stats.invalid++; continue; } // input validation
+      if (seen.has(key)) { stats.duplicate++; continue; }            // dedup vs DB
+      if (inFile.has(key)) { stats.inFileDup++; continue; }          // dedup within file
+      inFile.add(key);
     }
+    stats.netNew++;
     toInsert.push({
       company,
       ...normalize({
@@ -290,6 +313,22 @@ export async function importCsv(company, rows) {
       }),
     });
   }
+  return { toInsert, stats };
+}
+
+// Dry-run: compute exactly what an import would do (net-new / duplicate / invalid
+// / blank) WITHOUT writing anything. Powers the upload preview UI.
+export async function previewImport(company, rows) {
+  const { stats } = await prepareImport(company, rows);
+  return stats;
+}
+
+// Import rows (from CSV/Excel upload or Google Sheets). Tolerant of common header
+// names, e.g. "Email Address", "Full Name", "Company", "Phone Number". Runs the
+// same validation + dedup as previewImport, then batch-inserts the net-new rows.
+export async function importCsv(company, rows) {
+  const sb = getSupabase();
+  const { toInsert, stats } = await prepareImport(company, rows);
   // Batched inserts (1000/req) — never one giant payload, so no statement timeout.
   let added = 0;
   for (let i = 0; i < toInsert.length; i += 1000) {
@@ -298,7 +337,7 @@ export async function importCsv(company, rows) {
     if (error) throw new Error(`leads import failed at row ${i}: ${error.message}`);
     added += chunk.length;
   }
-  return { added };
+  return { added, ...stats };
 }
 
 // ── Email list validation (deliverability) ───────────────────────────────────
