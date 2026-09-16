@@ -29,12 +29,25 @@ function parseCsv(txt: string) {
     .map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()])));
 }
 
+// GET → all existing (lowercased) emails for the company. The upload UI fetches
+// this once and does dedup/validation client-side, so it never POSTs a whole
+// large file up (which exceeds the request-body limit → 413 "Request Entity Too
+// Large"). Only the net-new rows are POSTed back, in small chunks.
+export async function GET(req: NextRequest) {
+  const company = req.headers.get('x-company') || 'LagosTSQ';
+  return NextResponse.json({ emails: await store.existingEmails(company) });
+}
+
 export async function POST(req: NextRequest) {
   const company = req.headers.get('x-company') || 'LagosTSQ';
   const body = await req.json();
-  // Accept either pre-parsed `rows` (from the client-side CSV/Excel parser) or a
-  // raw `csv` string (paste box / legacy callers). `dryRun` returns the
-  // validation+dedup preview without writing.
+  // Upload path: `presorted` rows are already validated + deduped client-side and
+  // arrive in small chunks → straight insert (no re-scan, no giant payload).
+  if (body.presorted && Array.isArray(body.rows)) {
+    return NextResponse.json(await store.insertLeads(company, body.rows));
+  }
+  // Legacy path: a raw `csv` string (paste box) or pre-parsed `rows`. `dryRun`
+  // returns the validation+dedup preview without writing.
   const rows = Array.isArray(body.rows) ? body.rows : parseCsv(body.csv || '');
   if (body.dryRun) return NextResponse.json(await store.previewImport(company, rows));
   return NextResponse.json(await store.importCsv(company, rows));

@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation';
 import { Upload, Plus, Search, Trash2, Send, ChevronRight, X, Mail, Globe, Phone, MapPin, Sheet, ShieldCheck, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StageBadge, TableSkeleton, EmptyState } from '@/components/ui';
-import { useAddLead, useConfig, useDeleteLead, useLeads, useSyncSheet, useUpdateLead, useValidationCounts, useValidateLeads, useRemoveInvalidLeads, usePreviewImport, useImportRows } from '@/lib/hooks';
+import { useAddLead, useConfig, useDeleteLead, useLeads, useSyncSheet, useUpdateLead, useValidationCounts, useValidateLeads, useRemoveInvalidLeads, useRefreshLeads } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
+import { api } from '@/lib/api';
 import type { Lead, ImportStats } from '@/lib/api';
 
 const TABS = [
@@ -269,38 +270,55 @@ const RECOGNIZED_COLUMNS = new Set([
   'source', 'subject',
 ]);
 
-type ImpStep = 'pick' | 'preview' | 'validating' | 'done';
+type ImpStep = 'pick' | 'analyzing' | 'preview' | 'importing' | 'validating' | 'done';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const IMPORT_CHUNK = 2000; // rows per POST — keeps each request well under the body limit
+
+function pickField(r: Record<string, string>, keys: string[]): string {
+  for (const k of keys) { const v = r[k]; if (v && String(v).trim()) return String(v).trim(); }
+  return '';
+}
 
 // Non-developer upload layer: drop a CSV or Excel file → validation + dedup
 // preview → import only the net-new → auto-run the MX validation pass.
+//
+// To stay under the request-body limit for big files (90k rows → ~10 MB), we do
+// NOT upload the whole file. We fetch existing emails ONCE, dedup + validate in
+// the browser, then POST only the net-new rows in small chunks.
 function ImportModal({ onClose }: { onClose: () => void }) {
-  const preview = usePreviewImport();
-  const importRows = useImportRows();
   const validate = useValidateLeads();
+  const refreshLeads = useRefreshLeads();
+  const confirm = useConfirm();
 
   const [step, setStep] = useState<ImpStep>('pick');
   const [fileName, setFileName] = useState('');
-  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [newRows, setNewRows] = useState<Record<string, string>[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [added, setAdded] = useState(0);
+  const [progress, setProgress] = useState(0);
   const [vRun, setVRun] = useState<{ checked: number; remaining: number } | null>(null);
-  const [err, setErr] = useState('');
   const [dragOver, setDragOver] = useState(false);
 
+  function fail(title: string, message: string) {
+    // Surface the problem in the app's themed global modal (not a raw alert).
+    confirm({ title, message, confirmLabel: 'OK' });
+  }
+
   async function handleFile(file: File) {
-    setErr('');
+    setStep('analyzing');
     try {
       const XLSX = await import('xlsx'); // lazy — keeps SheetJS out of the initial bundle
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
-      if (!raw.length) { setErr('That file has no data rows.'); return; }
+      if (!raw.length) { setStep('pick'); fail('Empty file', 'That file has no data rows.'); return; }
+
       // Lowercase/trim header keys (mirrors the server CSV parser) and keep only
-      // recognized columns so `pick()` matches and the payload stays lean.
+      // recognized columns so `pick()` matches and rows stay lean.
       const kept = new Set<string>();
-      const norm = raw.map((r) => {
+      const rows = raw.map((r) => {
         const o: Record<string, string> = {};
         for (const k of Object.keys(r)) {
           const key = k.trim().toLowerCase();
@@ -309,45 +327,84 @@ function ImportModal({ onClose }: { onClose: () => void }) {
         return o;
       });
       if (!kept.size) {
-        setErr('No recognizable columns found. Need at least an Email (or Instagram) column.');
+        setStep('pick');
+        fail('No recognizable columns', 'We couldn\'t find an Email (or Instagram) column. Make sure the first row has headers like "Email", "Guest Name", "Phone".');
         return;
       }
+
+      // Fetch existing emails once, then dedup + validate entirely client-side.
+      const { emails } = await api.existingEmails();
+      const existing = new Set(emails);
+      const seen = new Set<string>();
+      const s: ImportStats = { total: 0, blank: 0, invalid: 0, duplicate: 0, inFileDup: 0, netNew: 0 };
+      const net: Record<string, string>[] = [];
+      for (const r of rows) {
+        if (!Object.values(r).some((v) => String(v ?? '').trim())) continue;
+        s.total++;
+        const email = pickField(r, ['email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail']);
+        const ig = pickField(r, ['instagram', 'ig', 'handle', 'instagram handle']);
+        if (!email && !ig) { s.blank++; continue; }
+        if (email) {
+          const key = email.toLowerCase();
+          if (!EMAIL_RE.test(key)) { s.invalid++; continue; }
+          if (existing.has(key)) { s.duplicate++; continue; }
+          if (seen.has(key)) { s.inFileDup++; continue; }
+          seen.add(key);
+        }
+        s.netNew++;
+        net.push(r);
+      }
       setFileName(file.name);
-      setRows(norm);
       setColumns([...kept]);
-      const s = await preview.mutateAsync(norm); // dry-run: no writes
+      setNewRows(net);
       setStats(s);
       setStep('preview');
     } catch (e: any) {
-      setErr(e?.message || 'Could not read that file.');
+      setStep('pick');
+      fail('Could not read that file', e?.message || 'Unknown error while parsing the file.');
     }
   }
 
   async function runImport() {
+    setStep('importing');
+    setProgress(0);
+    let total = 0;
     try {
-      const r = await importRows.mutateAsync(rows);
-      setAdded(r.added);
-      // Auto-run the deliverability (MX) validation pass on the freshly-added leads.
-      setStep('validating');
-      let acc = { checked: 0, remaining: 0 };
-      for (let i = 0; i < 200; i++) { // safety bound
+      // Import net-new rows in small chunks so no single request is too large.
+      for (let i = 0; i < newRows.length; i += IMPORT_CHUNK) {
+        const chunk = newRows.slice(i, i + IMPORT_CHUNK);
+        const r = await api.insertLeadRows(chunk);
+        total += r.added;
+        setProgress(Math.min(i + chunk.length, newRows.length));
+      }
+      setAdded(total);
+    } catch (e: any) {
+      refreshLeads();
+      setStep('preview');
+      fail('Import failed', `${e?.message || 'Unknown error'}. ${total.toLocaleString()} lead(s) were added before it stopped.`);
+      return;
+    }
+    refreshLeads();
+
+    // Auto-run the deliverability (MX) validation pass on the freshly-added leads.
+    setStep('validating');
+    let acc = { checked: 0, remaining: 0 };
+    try {
+      for (let i = 0; i < 400; i++) { // safety bound
         const v = await validate.mutateAsync(2000);
         acc = { checked: acc.checked + v.checked, remaining: v.remaining };
         setVRun({ ...acc });
         if (v.done || v.checked === 0) break;
       }
-      setStep('done');
-    } catch (e: any) {
-      setErr(e?.message || 'Import failed.');
-      setStep('preview');
+    } catch {
+      /* validation is best-effort — leads are already imported; user can re-run from Email health */
     }
+    setStep('done');
   }
-
-  const busy = preview.isPending || importRows.isPending;
 
   return (
     <Modal title="Import leads" onClose={onClose} width={480}>
-      {step === 'pick' && (
+      {(step === 'pick' || step === 'analyzing') && (
         <>
           <p className="muted" style={{ fontSize: 12 }}>
             Drop a <b>CSV</b> or <b>Excel</b> file (.csv, .xlsx). We auto-detect columns like
@@ -356,23 +413,22 @@ function ImportModal({ onClose }: { onClose: () => void }) {
           <label
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); if (step === 'analyzing') return; const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}
             className="mt12"
             style={{
-              display: 'grid', placeItems: 'center', gap: 8, padding: '28px 16px', cursor: 'pointer',
+              display: 'grid', placeItems: 'center', gap: 8, padding: '28px 16px', cursor: step === 'analyzing' ? 'default' : 'pointer',
               border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 12,
               background: dragOver ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent',
               textAlign: 'center',
             }}
           >
-            {preview.isPending ? <Loader2 size={22} className="spin" /> : <FileSpreadsheet size={22} color="var(--accent)" />}
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{preview.isPending ? 'Analyzing…' : 'Click to choose or drag a file here'}</span>
+            {step === 'analyzing' ? <Loader2 size={22} className="spin" color="var(--accent)" /> : <FileSpreadsheet size={22} color="var(--accent)" />}
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{step === 'analyzing' ? 'Reading & checking for duplicates…' : 'Click to choose or drag a file here'}</span>
             <span className="faint" style={{ fontSize: 12 }}>CSV or Excel · headers in the first row</span>
             <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              style={{ display: 'none' }} disabled={preview.isPending}
+              style={{ display: 'none' }} disabled={step === 'analyzing'}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
           </label>
-          {err && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{err}</p>}
         </>
       )}
 
@@ -389,14 +445,21 @@ function ImportModal({ onClose }: { onClose: () => void }) {
             <Stat label="Blank (no email)" value={stats.blank} />
           </div>
           {stats.netNew === 0 && <p className="muted mt12" style={{ fontSize: 12 }}>Nothing new to add — every valid email is already in your list. 🎉</p>}
-          {err && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{err}</p>}
           <div className="row right mt16 gap8">
-            <button className="btn ghost" onClick={() => { setStep('pick'); setStats(null); setErr(''); }} disabled={busy}>Back</button>
-            <button className="btn" disabled={busy || stats.netNew === 0} onClick={runImport}>
-              {importRows.isPending ? 'Importing…' : `Import ${stats.netNew.toLocaleString()} new`}
+            <button className="btn ghost" onClick={() => { setStep('pick'); setStats(null); setNewRows([]); }}>Back</button>
+            <button className="btn" disabled={stats.netNew === 0} onClick={runImport}>
+              Import {stats.netNew.toLocaleString()} new
             </button>
           </div>
         </>
+      )}
+
+      {step === 'importing' && (
+        <div style={{ display: 'grid', placeItems: 'center', gap: 10, padding: '24px 8px', textAlign: 'center' }}>
+          <Loader2 size={22} className="spin" color="var(--accent)" />
+          <b style={{ fontSize: 14 }}>Importing…</b>
+          <span className="faint" style={{ fontSize: 12 }}>{progress.toLocaleString()} / {newRows.length.toLocaleString()} added</span>
+        </div>
       )}
 
       {step === 'validating' && (

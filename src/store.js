@@ -258,6 +258,36 @@ function pick(r, ...aliases) {
 // malformed addresses before they ever reach the table.
 const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Map a tolerant raw row (CSV/Excel/Sheets header names) → a normalized lead row.
+function mapRow(company, r, id, now) {
+  return {
+    company,
+    ...normalize({
+      id,
+      business: pick(r, 'business', 'business_name', 'business name', 'company', 'company name', 'organization'),
+      name: pick(r, 'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name', 'guest name', 'guest'),
+      email: pick(r, 'email', 'to_email', 'email address', 'emailaddress', 'e-mail', 'mail'),
+      instagram: pick(r, 'instagram', 'ig', 'handle', 'instagram handle'),
+      phone: pick(r, 'phone', 'phone number', 'mobile', 'tel', 'telephone'),
+      website: pick(r, 'website', 'url', 'site', 'web'),
+      category: pick(r, 'category', 'type', 'vertical'),
+      borough: pick(r, 'borough', 'city', 'area', 'location'),
+      source: pick(r, 'source') || 'import',
+      subject: pick(r, 'subject'),
+      created_at: now,
+    }),
+  };
+}
+
+// All existing (lowercased) emails for a company. Powers the upload UI's
+// client-side dedup preview — the browser downloads this set ONCE and computes
+// new-vs-duplicate locally, so it never has to POST a huge file up (which 413s).
+export async function existingEmails(company) {
+  const sb = getSupabase();
+  const rows = await fetchAllRows(() => sb.from(LEADS).select('email').eq('company', company).neq('email', ''));
+  return rows.map((r) => String(r.email || '').toLowerCase()).filter(Boolean);
+}
+
 // Shared import pipeline: reads a batch of raw rows, applies the input-validation
 // layer (syntax) + dedup (vs the DB and within the batch), and returns the rows
 // ready to insert plus a per-outcome tally. Used by BOTH previewImport (dry-run,
@@ -271,10 +301,7 @@ const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 //   inFileDup  — email repeats earlier in this same file
 //   netNew     — passes all gates → queued for insert
 async function prepareImport(company, rows) {
-  const sb = getSupabase();
-  // Existing emails (email column only) → dedup set. Fast, slim scan.
-  const existing = await fetchAllRows(() => sb.from(LEADS).select('email').eq('company', company).neq('email', ''));
-  const seen = new Set(existing.map((r) => String(r.email || '').toLowerCase()));
+  const seen = new Set(await existingEmails(company));
   const inFile = new Set();
   let id = await nextLeadId(company);
   const now = new Date().toISOString();
@@ -295,23 +322,7 @@ async function prepareImport(company, rows) {
       inFile.add(key);
     }
     stats.netNew++;
-    toInsert.push({
-      company,
-      ...normalize({
-        id: id++,
-        business: pick(r, 'business', 'business_name', 'business name', 'company', 'company name', 'organization'),
-        name: pick(r, 'name', 'owner', 'full name', 'fullname', 'first name', 'contact', 'contact name', 'guest name', 'guest'),
-        email,
-        instagram,
-        phone: pick(r, 'phone', 'phone number', 'mobile', 'tel', 'telephone'),
-        website: pick(r, 'website', 'url', 'site', 'web'),
-        category: pick(r, 'category', 'type', 'vertical'),
-        borough: pick(r, 'borough', 'city', 'area', 'location'),
-        source: pick(r, 'source') || 'import',
-        subject: pick(r, 'subject'),
-        created_at: now,
-      }),
-    });
+    toInsert.push(mapRow(company, r, id++, now));
   }
   return { toInsert, stats };
 }
@@ -338,6 +349,27 @@ export async function importCsv(company, rows) {
     added += chunk.length;
   }
   return { added, ...stats };
+}
+
+// Insert a chunk of already-validated, already-deduped rows (the upload UI does
+// dedup client-side against `existingEmails`, then POSTs net-new rows in small
+// chunks). Assigns a contiguous id block, then batch-inserts. `ignoreDuplicates`
+// upsert guards the rare race where the same email arrives twice concurrently.
+export async function insertLeads(company, rows) {
+  const sb = getSupabase();
+  const clean = (rows || []).filter((r) => r && Object.values(r).some((v) => String(v ?? '').trim()));
+  if (!clean.length) return { added: 0 };
+  let id = await nextLeadId(company);
+  const now = new Date().toISOString();
+  const toInsert = clean.map((r) => mapRow(company, r, id++, now));
+  let added = 0;
+  for (let i = 0; i < toInsert.length; i += 1000) {
+    const chunk = toInsert.slice(i, i + 1000);
+    const { error } = await sb.from(LEADS).insert(chunk);
+    if (error) throw new Error(`leads insert failed at row ${i}: ${error.message}`);
+    added += chunk.length;
+  }
+  return { added };
 }
 
 // ── Email list validation (deliverability) ───────────────────────────────────

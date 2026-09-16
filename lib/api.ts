@@ -143,8 +143,17 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
     ...opts,
     headers: { 'Content-Type': 'application/json', 'x-company': getCompany(), ...(opts?.headers || {}) },
   });
-  const data = await r.json();
-  if (!r.ok) throw new Error((data && data.error) || `request failed: ${r.status}`);
+  // Read as text first: error responses (413 "Request Entity Too Large", proxy
+  // HTML pages, gateway timeouts) are often NOT JSON, and blindly calling
+  // r.json() on them throws a cryptic "Unexpected token" instead of a real error.
+  const text = await r.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
+  if (!r.ok) {
+    if (r.status === 413) throw new Error('That upload is too large to send in one request. Please split it into smaller files.');
+    const msg = (data && data.error) || (text && text.slice(0, 200)) || `request failed: ${r.status}`;
+    throw new Error(msg);
+  }
   return data as T;
 }
 
@@ -169,12 +178,11 @@ export const api = {
   updateLead: (id: number, body: Partial<Lead>) => req<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteLead: (id: number) => req<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' }),
   importCsv: (csv: string) => req<{ added: number }>('/api/import', { method: 'POST', body: JSON.stringify({ csv }) }),
-  // Upload flow: send pre-parsed rows (from a CSV/Excel file). `dryRun` returns
-  // the validation + dedup preview (net-new vs duplicate/invalid/blank) with no writes.
-  previewImport: (rows: Record<string, string>[]) =>
-    req<ImportStats>('/api/import', { method: 'POST', body: JSON.stringify({ rows, dryRun: true }) }),
-  importRows: (rows: Record<string, string>[]) =>
-    req<{ added: number } & ImportStats>('/api/import', { method: 'POST', body: JSON.stringify({ rows }) }),
+  // Upload flow (large files): fetch existing emails once → dedup client-side →
+  // POST only net-new rows in small chunks (avoids the request-body 413).
+  existingEmails: () => req<{ emails: string[] }>('/api/import'),
+  insertLeadRows: (rows: Record<string, string>[]) =>
+    req<{ added: number }>('/api/import', { method: 'POST', body: JSON.stringify({ rows, presorted: true }) }),
   // Email list validation (syntax + MX). counts (GET) + validate a batch (POST, loop until done).
   validationCounts: () => req<{ valid: number; invalid: number; risky_relay: number; unchecked: number }>('/api/leads/validate'),
   validateLeads: (limit?: number) => req<{ checked: number; valid: number; invalid: number; risky_relay: number; remaining: number; done: boolean }>('/api/leads/validate', { method: 'POST', body: JSON.stringify({ limit }) }),
