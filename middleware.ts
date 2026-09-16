@@ -19,6 +19,7 @@ export async function middleware(request: NextRequest) {
     pathname === '/privacy' ||
     pathname === '/api/optin' ||
     pathname.startsWith('/api/cron/') ||
+    pathname.startsWith('/api/webhooks/') || // provider webhooks (Resend, etc.) auth via signature, not a session cookie
     pathname.startsWith('/api/auth/')
   ) {
     return NextResponse.next();
