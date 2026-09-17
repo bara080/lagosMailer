@@ -56,12 +56,14 @@ export default function OptInPage() {
             <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5, color: '#b6acc2', lineHeight: 1.5, marginTop: 4 }}>
               <input type="checkbox" checked={form.consent} onChange={set('consent')} style={{ marginTop: 3 }} />
               <span>
-                <b style={{ color: '#d9b26a' }}>Optional:</b> By checking this box, I agree to receive recurring marketing text messages
-                from Native Harlem at the number provided. Consent is not a condition of any purchase.
+                <b style={{ color: '#d9b26a' }}>Optional:</b> By checking this box, I agree to receive recurring automated marketing
+                text messages (events, specials, promotions, and reservation reminders) from Native Harlem at the number provided.
+                Consent is not a condition of any purchase.
                 Message frequency may vary. Message &amp; data rates may apply. Reply HELP for help and STOP to opt out.
                 See our{' '}
                 <a href="/privacy" style={{ color: '#d9b26a' }}>Privacy Policy</a> and{' '}
                 <a href="/privacy#terms" style={{ color: '#d9b26a' }}>Terms &amp; Conditions</a>.
+                Your mobile information will not be sold or shared with third parties for promotional or marketing purposes.
               </span>
             </label>
 
@@ -76,7 +78,7 @@ export default function OptInPage() {
 
         <p style={{ color: '#7d7390', fontSize: 11, marginTop: 18, lineHeight: 1.5 }}>
           Native Harlem · 2319 Frederick Douglass Blvd, New York, NY 10027 · 212 913 0226.
-          We never share your mobile opt-in data with third parties.
+          Your mobile information will not be sold or shared with third parties for promotional or marketing purposes.
           Text messages are sent by Click Build Technologies LLC on behalf of Native Harlem.
         </p>
       </div>
