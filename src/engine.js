@@ -5,7 +5,7 @@
 import { getSupabase } from '../lib/supabase.js';
 import * as store from './store.js';
 import {
-  openMailer, render, renderSignatureHtml, renderSignatureText, prepareAttachments, mailerConfig,
+  openMailer, sendMany, render, renderSignatureHtml, renderSignatureText, prepareAttachments, mailerConfig,
 } from '../lib/send.js';
 import { unsubHeaders, unsubFooterHtml, unsubFooterText } from '../lib/unsubscribe.js';
 import { ENGINE } from './engine-config.js';
@@ -519,29 +519,44 @@ export async function drainChunk(company, runId) {
 
   let accepted = 0;
   try {
-    for (const rcp of (batch || [])) {
-      const lead = { email: rcp.normalized_email, name: rcp.personalization?.name || '', business: rcp.personalization?.business || '', category: rcp.personalization?.category || '' };
-      try {
-        const res = await emailer.send({
-          to: rcp.normalized_email,
-          subject: render(version.subject, lead) || 'Message',
-          text: version.text_body ? render(version.text_body, lead) + renderSignatureText(sig, lead) + unsubFooterText(company, rcp.normalized_email) : undefined,
-          html: version.html_body ? render(version.html_body, lead) + att.inlineHtml + renderSignatureHtml(sig, lead) + unsubFooterHtml(company, rcp.normalized_email) : undefined,
-          headers: { ...(version.reply_to ? { 'Reply-To': version.reply_to } : {}), ...unsubHeaders(company, rcp.normalized_email) },
-          attachments: att.files.length ? att.files : undefined,
-        });
-        await sb.from('campaign_recipients').update({
-          status: 'accepted', provider, provider_message_id: res?.id || null,
-          accepted_at: new Date().toISOString(), attempt_count: (rcp.attempt_count || 0) + 1,
-        }).eq('id', rcp.id);
-        if (rcp.lead_id) await store.markContacted(company, rcp.lead_id, render(version.subject, lead));
+    const list = batch || [];
+    const leads = list.map((rcp) => ({ email: rcp.normalized_email, name: rcp.personalization?.name || '', business: rcp.personalization?.business || '', category: rcp.personalization?.category || '' }));
+    // Compose all messages for this chunk, then hand them to the reusable multi-send
+    // (Resend batch API when available — ~50-100x fewer network calls than per-email).
+    const messages = list.map((rcp, i) => ({
+      to: rcp.normalized_email,
+      subject: render(version.subject, leads[i]) || 'Message',
+      text: version.text_body ? render(version.text_body, leads[i]) + renderSignatureText(sig, leads[i]) + unsubFooterText(company, rcp.normalized_email) : undefined,
+      html: version.html_body ? render(version.html_body, leads[i]) + att.inlineHtml + renderSignatureHtml(sig, leads[i]) + unsubFooterHtml(company, rcp.normalized_email) : undefined,
+      headers: { ...(version.reply_to ? { 'Reply-To': version.reply_to } : {}), ...unsubHeaders(company, rcp.normalized_email) },
+      attachments: att.files.length ? att.files : undefined,
+    }));
+    const results = await sendMany(emailer, provider, messages);
+
+    // Persist per-recipient outcome. Updates run concurrently (provider_message_id
+    // differs per row, so each needs its own update) — far faster than serial.
+    const nowIso = new Date().toISOString();
+    const acceptedLeadIds = [];
+    await Promise.all(list.map((rcp, i) => {
+      const res = results[i] || { ok: false, error: 'no result' };
+      if (res.ok) {
         accepted++;
-      } catch (e) {
-        await sb.from('campaign_recipients').update({
-          status: 'failed', provider, last_error_message: String(e.message || e).slice(0, 500),
-          attempt_count: (rcp.attempt_count || 0) + 1,
+        if (rcp.lead_id) acceptedLeadIds.push(rcp.lead_id);
+        return sb.from('campaign_recipients').update({
+          status: 'accepted', provider, provider_message_id: res.id || null,
+          accepted_at: nowIso, attempt_count: (rcp.attempt_count || 0) + 1,
         }).eq('id', rcp.id);
       }
+      return sb.from('campaign_recipients').update({
+        status: 'failed', provider, last_error_message: String(res.error || 'send failed').slice(0, 500),
+        attempt_count: (rcp.attempt_count || 0) + 1,
+      }).eq('id', rcp.id);
+    }));
+
+    // Mark contacted in bulk (2 queries for the whole chunk) instead of one per lead.
+    if (acceptedLeadIds.length) {
+      await sb.from('leads').update({ contacted_at: nowIso }).eq('company', company).in('id', acceptedLeadIds).is('contacted_at', null);
+      await sb.from('leads').update({ stage: 'contacted' }).eq('company', company).in('id', acceptedLeadIds).eq('stage', 'new');
     }
   } finally {
     await emailer.close();
