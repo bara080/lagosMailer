@@ -18,7 +18,7 @@ export default function PrivacyPage() {
         <p style={p}>
           Native Harlem (“we”, “us”) operates a restaurant at 2319 Frederick Douglass Blvd, New York, NY 10027.
           This policy explains how we collect, use, and protect your information, including for our SMS text-message program.
-          Text messages are sent by <strong>Click Build Technologies LLC</strong> on behalf of Native Harlem.
+          Text messages are sent by <strong>Native Harlem</strong>.
         </p>
 
         <h2 style={h2}>Information we collect</h2>

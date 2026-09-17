@@ -159,10 +159,26 @@ export async function counts(company) {
 export async function add(company, input) {
   const sb = getSupabase();
   const lead = normalize({ ...input, id: await nextLeadId(company), created_at: new Date().toISOString() });
-  if (!lead.email && !lead.instagram) throw new Error('a lead needs an email or an instagram handle');
+  // A lead needs at least one identifier. Phone is valid on its own so the SMS
+  // opt-in form (phone-only, no email) captures successfully — it's the 10DLC
+  // consent path and must never fail here.
+  if (!lead.email && !lead.instagram && !lead.phone) {
+    throw new Error('a lead needs an email, phone, or instagram handle');
+  }
   if (lead.email) {
     const { data: dup } = await sb.from(LEADS).select('id').eq('company', company).ilike('email', lead.email).limit(1).maybeSingle();
     if (dup) throw new Error('a lead with that email already exists');
+  } else if (lead.phone) {
+    // Phone-only (SMS opt-in): idempotent by phone. If this number already exists,
+    // update its notes/name (record the latest opt-in) and return it — a repeat
+    // submission must not error or create a duplicate.
+    const { data: dup } = await sb.from(LEADS).select('id').eq('company', company).eq('phone', lead.phone).limit(1).maybeSingle();
+    if (dup) {
+      const patch = { notes: lead.notes };
+      if (lead.name) patch.name = lead.name;
+      await sb.from(LEADS).update(patch).eq('company', company).eq('id', dup.id);
+      return { ...lead, id: dup.id };
+    }
   }
   const { error } = await sb.from(LEADS).insert({ company, ...lead });
   if (error) throw new Error(`lead add failed: ${error.message}`);

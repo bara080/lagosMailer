@@ -27,7 +27,8 @@ export async function POST(req: NextRequest) {
         : `Submitted web form ${new Date().toISOString()} — SMS consent NOT given`,
     });
     await store.logActivity(company, { type: 'optin', text: consented ? `New SMS opt-in: ${phone}` : `Form submit (no SMS consent): ${phone}` });
-    return NextResponse.json({ ok: true });
+    // Return the resulting subscription STATE so the form can show it in the modal.
+    return NextResponse.json({ ok: true, consented, phone, state: consented ? 'subscribed' : 'not_subscribed' });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
