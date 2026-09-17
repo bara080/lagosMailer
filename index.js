@@ -78,7 +78,10 @@ export class Emailer {
     });
     // Envelope-from should be the bare address even if `from` is "Name <addr>".
     const envelopeFrom = (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
-    await this.client.sendMessage(envelopeFrom, msg.to, raw);
+    // Returns the provider message id (SES's "250 Ok <id>") so callers like
+    // sendMany can persist it as provider_message_id for bounce reconciliation.
+    const id = await this.client.sendMessage(envelopeFrom, msg.to, raw);
+    return { id };
   }
 
   async close() {

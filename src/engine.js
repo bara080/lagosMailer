@@ -5,7 +5,7 @@
 import { getSupabase } from '../lib/supabase.js';
 import * as store from './store.js';
 import {
-  openMailer, sendMany, render, renderSignatureHtml, renderSignatureText, prepareAttachments, mailerConfig,
+  openMailer, sendMany, render, renderSignatureHtml, renderSignatureText, prepareAttachments, mailerConfig, sesConfigHeaders,
 } from '../lib/send.js';
 import { unsubHeaders, unsubFooterHtml, unsubFooterText } from '../lib/unsubscribe.js';
 import { ENGINE } from './engine-config.js';
@@ -220,10 +220,21 @@ export async function listRecipients(company, runId, opts = {}) {
 
 // Provider webhook → recipient delivery signal. Idempotent (dedup by event id),
 // matches the recipient by provider_message_id, records the delivery timestamp,
-// and suppresses hard bounces / complaints for future runs.
+// and suppresses ONLY permanent hard bounces + complaints for future runs.
+//
+// BUGFIX 2026-09-17 (over-suppression): the previous version mapped `email.bounced`
+// to `suppress: 'bounce'` UNCONDITIONALLY — every bounce, transient or permanent,
+// was added to the suppression list forever. When a cold domain blasts at volume,
+// Gmail returns huge numbers of *transient* bounces (deferrals / "message expired" /
+// mailbox-full) that are recoverable, NOT dead addresses. That blanket suppress
+// permanently removed ~22k real recipients after the first big Native125th blast
+// (classification: 93.5% Transient vs 4.5% Permanent). We now suppress a bounce only
+// when the provider marks it `type === 'Permanent'`. Transient/undetermined bounces
+// are still recorded (bounced_at + last_error_*) but left reachable for a warmed send.
+// Prior line for rollback reference:  'email.bounced': { field: 'bounced_at', suppress: 'bounce' },
 const RESEND_MAP = {
   'email.delivered': { field: 'delivered_at' },
-  'email.bounced': { field: 'bounced_at', suppress: 'bounce' },
+  'email.bounced': { field: 'bounced_at' }, // suppression decided per-event by bounce.type below
   'email.complained': { field: 'complained_at', suppress: 'complaint' },
 };
 
@@ -243,14 +254,125 @@ export async function ingestProviderEvent(provider, eventId, type, data = {}) {
     .select('id, company, run_id, normalized_email').eq('provider_message_id', emailId).maybeSingle();
   if (!rcp) return { noMatch: true };
 
-  await sb.from('campaign_recipients').update({ [map.field]: new Date().toISOString() }).eq('id', rcp.id);
-  if (map.suppress) {
+  // Stamp the event timestamp; decide suppression.
+  const update = { [map.field]: new Date().toISOString() };
+  let suppressReason = map.suppress || null; // complaints always suppress
+
+  if (type === 'email.bounced') {
+    // Resend (and the SES SNS mapping) include a `bounce` object: { type, subType, message }.
+    // type ∈ { 'Permanent', 'Transient', 'Undetermined' }. Only Permanent = a true hard
+    // bounce (dead mailbox) → suppress. Everything else is recoverable → record only.
+    const bounce = data.bounce || {};
+    update.last_error_code = bounce.type || null;
+    update.last_error_message = [bounce.subType, bounce.message].filter(Boolean).join(': ').slice(0, 500) || null;
+    if (String(bounce.type || '').toLowerCase() === 'permanent') suppressReason = 'bounce';
+  }
+
+  await sb.from('campaign_recipients').update(update).eq('id', rcp.id);
+  if (suppressReason) {
     await sb.from('suppression_list').upsert(
-      { company: rcp.company, normalized_email: rcp.normalized_email, reason: map.suppress, source: 'resend-webhook' },
+      { company: rcp.company, normalized_email: rcp.normalized_email, reason: suppressReason, source: 'resend-webhook' },
       { onConflict: 'company,normalized_email', ignoreDuplicates: true });
   }
-  await logEvent(rcp.company, rcp.run_id, `email.${map.field.replace('_at', '')}`, { email: rcp.normalized_email }, 'webhook');
-  return { ok: true, recipient: rcp.id };
+  await logEvent(rcp.company, rcp.run_id, `email.${map.field.replace('_at', '')}`,
+    { email: rcp.normalized_email, ...(type === 'email.bounced' ? { bounceType: data.bounce?.type || null, suppressed: !!suppressReason } : {}) }, 'webhook');
+  return { ok: true, recipient: rcp.id, suppressed: !!suppressReason };
+}
+
+// ── Amazon SES event ingestion (via SNS) ────────────────────────────────────
+// SES delivers Bounce/Complaint/Delivery events through an SNS topic on the
+// configuration set. Same suppression policy as ingestProviderEvent: suppress ONLY
+// permanent hard bounces + complaints; transient bounces are recorded, not suppressed.
+// Matches the recipient row by SES messageId when available (populated once the SMTP
+// send captures the SES Message-ID); otherwise still suppresses by (company, email),
+// deriving company from the sending domain so protection works even before that.
+const SES_EVENT_MAP = {
+  Bounce: { field: 'bounced_at' },
+  Complaint: { field: 'complained_at', suppress: 'complaint' },
+  Delivery: { field: 'delivered_at' },
+};
+
+// Sending-domain → company fallback for events we can't match to a recipient row.
+// Extend as tenants are added (irstaxcenter, …).
+const SES_SENDER_DOMAIN_COMPANY = {
+  'native125th.com': 'Native125th',
+  'lagosnyc.com': 'LagosTSQ',
+};
+
+function companyFromSesSource(source) {
+  // source may be "Name <info@native125th.com>" or a bare address; MAIL FROM may
+  // prefix the domain with "mail." — strip it before matching.
+  const addr = (String(source || '').match(/<([^>]+)>/)?.[1] || source || '').trim();
+  const domain = (addr.split('@')[1] || '').replace(/^mail\./, '').toLowerCase();
+  return SES_SENDER_DOMAIN_COMPANY[domain] || null;
+}
+
+export async function ingestSesEvent(eventId, event = {}) {
+  const sb = getSupabase();
+  const type = event.eventType || event.notificationType; // event-publishing vs identity notif
+  const map = SES_EVENT_MAP[type];
+  if (!map) return { ignored: true, type };
+
+  // Idempotency: first insert wins; an SNS redelivery hits the unique PK and no-ops.
+  const { error: dupErr } = await sb.from('provider_events')
+    .insert({ provider: 'ses', provider_event_id: eventId, event_type: type, payload: event });
+  if (dupErr) { if (dupErr.code === '23505') return { duplicate: true }; throw new Error(`provider_events: ${dupErr.message}`); }
+
+  const messageId = event.mail?.messageId || null;
+  const fallbackCompany = companyFromSesSource(event.mail?.source || event.mail?.commonHeaders?.from?.[0]);
+
+  let recipients = [];
+  let bounceType = null, bounceSub = null;
+  if (type === 'Bounce') {
+    bounceType = event.bounce?.bounceType || null;      // Permanent | Transient | Undetermined
+    bounceSub = event.bounce?.bounceSubType || null;
+    recipients = (event.bounce?.bouncedRecipients || []).map((r) => ({ email: r.emailAddress, diag: r.diagnosticCode }));
+  } else if (type === 'Complaint') {
+    recipients = (event.complaint?.complainedRecipients || []).map((r) => ({ email: r.emailAddress }));
+  } else if (type === 'Delivery') {
+    recipients = (event.delivery?.recipients || []).map((email) => ({ email }));
+  }
+
+  let suppressReason = map.suppress || null;            // complaint always suppresses
+  if (type === 'Bounce' && String(bounceType || '').toLowerCase() === 'permanent') suppressReason = 'bounce';
+
+  const nowIso = new Date().toISOString();
+  const results = [];
+  for (const r of recipients) {
+    const email = String(r.email || '').toLowerCase();
+    if (!email) continue;
+
+    // Prefer matching the exact recipient row by SES messageId (+ email).
+    let rcp = null;
+    if (messageId) {
+      const { data } = await sb.from('campaign_recipients')
+        .select('id, company, run_id, normalized_email')
+        .eq('provider_message_id', messageId).eq('normalized_email', email).maybeSingle();
+      rcp = data || null;
+    }
+    const company = rcp?.company || fallbackCompany;
+
+    if (rcp) {
+      const upd = { [map.field]: nowIso };
+      if (type === 'Bounce') {
+        upd.last_error_code = bounceType;
+        upd.last_error_message = [bounceSub, r.diag].filter(Boolean).join(': ').slice(0, 500) || null;
+      }
+      await sb.from('campaign_recipients').update(upd).eq('id', rcp.id);
+    }
+
+    if (suppressReason && company) {
+      await sb.from('suppression_list').upsert(
+        { company, normalized_email: email, reason: suppressReason, source: 'ses-webhook' },
+        { onConflict: 'company,normalized_email', ignoreDuplicates: true });
+    }
+    if (rcp) {
+      await logEvent(company, rcp.run_id, `ses.${type.toLowerCase()}`,
+        { email, bounceType, suppressed: !!(suppressReason && company) }, 'webhook');
+    }
+    results.push({ email, matched: !!rcp, company: company || null, suppressed: !!(suppressReason && company) });
+  }
+  return { ok: true, type, count: results.length, results };
 }
 
 // Today's engine quota usage (for the monitor's "Daily quota" header).
@@ -523,12 +645,13 @@ export async function drainChunk(company, runId) {
     const leads = list.map((rcp) => ({ email: rcp.normalized_email, name: rcp.personalization?.name || '', business: rcp.personalization?.business || '', category: rcp.personalization?.category || '' }));
     // Compose all messages for this chunk, then hand them to the reusable multi-send
     // (Resend batch API when available — ~50-100x fewer network calls than per-email).
+    const sesHeaders = sesConfigHeaders(company); // tags SES sends so events reach the webhook (no-op for non-SES)
     const messages = list.map((rcp, i) => ({
       to: rcp.normalized_email,
       subject: render(version.subject, leads[i]) || 'Message',
       text: version.text_body ? render(version.text_body, leads[i]) + renderSignatureText(sig, leads[i]) + unsubFooterText(company, rcp.normalized_email) : undefined,
       html: version.html_body ? render(version.html_body, leads[i]) + att.inlineHtml + renderSignatureHtml(sig, leads[i]) + unsubFooterHtml(company, rcp.normalized_email) : undefined,
-      headers: { ...(version.reply_to ? { 'Reply-To': version.reply_to } : {}), ...unsubHeaders(company, rcp.normalized_email) },
+      headers: { ...sesHeaders, ...(version.reply_to ? { 'Reply-To': version.reply_to } : {}), ...unsubHeaders(company, rcp.normalized_email) },
       attachments: att.files.length ? att.files : undefined,
     }));
     const results = await sendMany(emailer, provider, messages);

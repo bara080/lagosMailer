@@ -144,7 +144,14 @@ export class SmtpClient {
     // Dot-stuff any line that begins with '.' per RFC 5321, then terminate.
     const body = message.replace(/\r?\n/g, '\r\n').replace(/\r\n\./g, '\r\n..');
     this.sock.write(body + '\r\n.\r\n');
-    await this.expect([250]);
+    const reply = await this.expect([250]);
+    // Capture the provider message id from the final 250 line. Amazon SES returns
+    // "250 Ok <messageId>", and that id equals mail.messageId in SES bounce/complaint
+    // events — returning it lets the SES webhook reconcile events to the right recipient.
+    // Other servers (e.g. Gmail) use a different 250 format; we just return null then.
+    const last = (reply.raw || '').trim().split(/\r?\n/).pop() || '';
+    const m = last.match(/^250[ -]Ok\s+(\S+)/i);
+    return m ? m[1] : null;
   }
 
   async quit() {
