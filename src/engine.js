@@ -546,6 +546,20 @@ async function commitQuota(company, n) {
   await sb.rpc('commit_quota', { p_company: company, p_channel: ENGINE.channel, p_date: quotaDate(), p_n: n });
 }
 
+// Update a recipient row, retrying on a failed write. Critical for ACCEPTED rows:
+// a message that WAS sent must record its provider_message_id, otherwise claim
+// recovery (status='sending' AND provider_message_id IS NULL) would reclaim and
+// RE-SEND it — a duplicate email. Retrying the write closes that double-send window.
+async function updateRecipientWithRetry(id, patch, tries = 3) {
+  const sb = getSupabase();
+  for (let a = 0; a < tries; a++) {
+    const { error } = await sb.from('campaign_recipients').update(patch).eq('id', id);
+    if (!error) return true;
+    await new Promise((r) => setTimeout(r, 200 * (a + 1)));
+  }
+  return false; // extremely rare (3 consecutive write failures); row stays 'sending'
+}
+
 // ── Drain one chunk (the unit the per-run workflow repeats) ─────────────────
 // Returns { done | paused | stopped | capReached | sentNow }.
 export async function drainChunk(company, runId) {
@@ -660,14 +674,26 @@ export async function drainChunk(company, runId) {
     // differs per row, so each needs its own update) — far faster than serial.
     const nowIso = new Date().toISOString();
     const acceptedLeadIds = [];
+    let requeued = 0;
     await Promise.all(list.map((rcp, i) => {
       const res = results[i] || { ok: false, error: 'no result' };
       if (res.ok) {
         accepted++;
         if (rcp.lead_id) acceptedLeadIds.push(rcp.lead_id);
-        return sb.from('campaign_recipients').update({
+        // Retried write — a sent row MUST record provider_message_id (double-send guard).
+        return updateRecipientWithRetry(rcp.id, {
           status: 'accepted', provider, provider_message_id: res.id || null,
           accepted_at: nowIso, attempt_count: (rcp.attempt_count || 0) + 1,
+        });
+      }
+      if (res.retryable) {
+        // Provider throttled / transient error after in-call backoff — NOT sent.
+        // Requeue as pending (never 'failed', which would silently drop a real
+        // recipient — the Resend-blast bug). Next chunk reclaims + re-reserves quota.
+        requeued++;
+        return sb.from('campaign_recipients').update({
+          status: 'pending', provider, last_error_message: String(res.error || 'throttled').slice(0, 500),
+          attempt_count: (rcp.attempt_count || 0) + 1,
         }).eq('id', rcp.id);
       }
       return sb.from('campaign_recipients').update({
@@ -675,6 +701,7 @@ export async function drainChunk(company, runId) {
         attempt_count: (rcp.attempt_count || 0) + 1,
       }).eq('id', rcp.id);
     }));
+    if (requeued) await logEvent(company, runId, 'batch.requeued', { requeued, reason: 'provider throttled/transient' });
 
     // Mark contacted in bulk (2 queries for the whole chunk) instead of one per lead.
     if (acceptedLeadIds.length) {
