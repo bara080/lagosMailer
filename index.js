@@ -15,6 +15,21 @@ export { SmtpClient } from './src/smtp-client.js';
 export { buildMessage } from './src/build-message.js';
 export { loadEnv } from './src/load-env.js';
 
+// Normalize a From that may be bare ("a@b.com"), a display-name form
+// ("Name <a@b.com>"), or ACCIDENTALLY doubly-wrapped ("Name <Name <a@b.com>>",
+// which a "From name" field + a name-bearing MAILER_FROM produce together).
+// Returns a clean RFC 5322 header + a BARE envelope address. Without this, a
+// doubly-wrapped From makes SES reject the envelope with 553 "Invalid email
+// address" (as happened once MAILER_FROM was set with a display name).
+export function normalizeFrom(from) {
+  const s = String(from || '').trim();
+  const email = (s.match(/[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/) || [])[0] || s.replace(/[<>]/g, '').trim();
+  const lt = s.indexOf('<');
+  let name = (lt >= 0 ? s.slice(0, lt) : '').replace(/["<>]/g, '').trim();
+  if (name.toLowerCase() === email.toLowerCase()) name = '';
+  return { header: name ? `${name} <${email}>` : email, envelope: email };
+}
+
 export class Emailer {
   /**
    * @param {SmtpClient} client
@@ -41,8 +56,7 @@ export class Emailer {
     // "Name <addr>" string, so pull the bare address first, then its domain, and
     // validate it's a clean hostname — otherwise a malformed From breaks the
     // SMTP handshake (501 HELO/EHLO invalid).
-    const bare = (String(cfg.from || '').match(/<([^>]+)>/)?.[1] ?? cfg.from ?? '').trim();
-    const domain = bare.split('@')[1];
+    const domain = (normalizeFrom(cfg.from).envelope.split('@')[1] || '');
     const ehloName = cfg.ehloName || (domain && /^[a-z0-9.-]+$/i.test(domain) ? domain : 'localhost');
     const client = await SmtpClient.connect({
       host: cfg.host,
@@ -66,9 +80,11 @@ export class Emailer {
    * @param {{ filename: string, content: Buffer, contentType?: string }[]} [msg.attachments]
    */
   async send(msg) {
-    const from = msg.from || this.from;
+    // Normalize the From into a clean header + bare envelope. Handles bare,
+    // "Name <addr>", and doubly-wrapped "Name <Name <addr>>" (avoids SES 553).
+    const { header: fromHeader, envelope: envelopeFrom } = normalizeFrom(msg.from || this.from);
     const raw = buildMessage({
-      from,
+      from: fromHeader,
       to: msg.to,
       subject: msg.subject,
       text: msg.text,
@@ -76,8 +92,6 @@ export class Emailer {
       headers: msg.headers,
       attachments: msg.attachments,
     });
-    // Envelope-from should be the bare address even if `from` is "Name <addr>".
-    const envelopeFrom = (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
     // Returns the provider message id (SES's "250 Ok <id>") so callers like
     // sendMany can persist it as provider_message_id for bounce reconciliation.
     const id = await this.client.sendMessage(envelopeFrom, msg.to, raw);
