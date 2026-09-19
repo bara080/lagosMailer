@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Zap, Send, Clock, FlaskConical, Eye, Sparkles, ArrowLeft, Paperclip, X, Image as ImageIcon, FileText, Images } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { useConfirm } from '@/components/ConfirmProvider';
+import { ProviderSelect } from '@/components/ProviderSelect';
 import { useConfig, useCreateCampaign, useUpdateCampaign, useCampaign, useAudiencePreview, useSendCampaign, useTestSend, useUploadAsset, useAssets, useCreateEngineCampaign, useCreateRun, useEngineCampaigns } from '@/lib/hooks';
 import { plainToHtml } from '@/lib/markdown';
 import type { Lead, Attachment, Asset } from '@/lib/api';
@@ -481,10 +482,7 @@ function ComposeInner() {
                 </label>
                 {/* Per-send ESP: overrides the company default so a single campaign can go via Resend or Gmail. */}
                 <label className="field grow"><span>Delivery</span>
-                  <select className="input" value={effectiveProvider} onChange={(e) => setProvider(e.target.value)}>
-                    <option value="smtp">Gmail (SMTP)</option>
-                    <option value="resend">Resend</option>
-                  </select>
+                  <ProviderSelect value={effectiveProvider} onChange={(e) => setProvider(e.target.value)} />
                 </label>
               </div>
               <div className="row gap12 mt12">

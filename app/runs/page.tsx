@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Rocket, Pause, Play, StopCircle, RotateCcw, Layers, Check, AlertCircle, X, Folder, FilePlus2, Users, UserCheck, CalendarClock, Trash2 } from 'lucide-react';
 import Topbar from '@/components/Topbar';
 import { StatusBadge, EmptyState, Modal, Stepper } from '@/components/ui';
+import { ProviderSelect, providerLabel as providerLabelFor } from '@/components/ProviderSelect';
 import { useConfig, useEngineCampaigns, useEngineRuns, useRunDetail, useCreateEngineCampaign, useCreateRun, useControlRun, useAudiencePreview, useEngineQuota, useRunRecipients, useDeleteRun, useDeleteEngineCampaign } from '@/lib/hooks';
 import { useConfirm } from '@/components/ConfirmProvider';
 import type { RunStage, EngineEvent } from '@/lib/api';
@@ -255,7 +256,7 @@ function NewCampaignModal({ senders, defaultProvider, onClose }: { senders: stri
               <select className="input" value={f.senderKey} onChange={set('senderKey')}>{senders.map((s) => <option key={s} value={s}>{s}</option>)}</select>
             </label>
             <label className="field grow"><span>Provider</span>
-              <select className="input" value={f.provider} onChange={set('provider')}><option value="smtp">Gmail (SMTP)</option><option value="resend">Resend</option></select>
+              <ProviderSelect value={f.provider} onChange={set('provider')} />
             </label>
           </div>
           <label className="field mt12"><span>Subject</span><input className="input" value={f.subject} onChange={set('subject')} placeholder="Use {{name}} / {{business}} to personalize" /></label>
@@ -266,7 +267,7 @@ function NewCampaignModal({ senders, defaultProvider, onClose }: { senders: stri
         <div>
           <div className="row between"><span className="faint" style={{ fontSize: 12, fontWeight: 600 }}>Preview</span><span className="faint" style={{ fontSize: 11 }}>as {sample.name} · {sample.business}</span></div>
           <div className="mt8" style={{ background: '#fff', color: '#111', borderRadius: 10, padding: 18, minHeight: 300 }}>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>From: <b>{f.senderKey || '—'}</b> · via {f.provider === 'resend' ? 'Resend' : 'Gmail'}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>From: <b>{f.senderKey || '—'}</b> · via {providerLabelFor(f.provider)}</div>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>{fillSample(f.subject) || <span style={{ color: '#999', fontWeight: 400 }}>(no subject)</span>}</div>
             <div style={{ lineHeight: 1.55, fontSize: 14, wordBreak: 'break-word' }} dangerouslySetInnerHTML={{ __html: toHtml(fillSample(f.message)) || '<i style="color:#999">Your message preview appears here…</i>' }} />
           </div>
@@ -321,7 +322,7 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
     : audienceKey === 'all' ? (aud?.emailable ?? 0) : 0;
   const stagePlan = cadenceOn ? stages.map((s, i) => ({ label: s.label, limit: s.limit ? Number(s.limit) : null, gate: gateStages && i > 0 ? 'manual' : 'none' })) : [];
   const days = estimate > 0 ? Math.max(1, Math.ceil(estimate / dailyCap)) : 0;
-  const providerLabel = (source === 'fresh' ? fresh.provider : config?.emailProvider) === 'resend' ? 'Resend' : 'Gmail';
+  const providerLabel = providerLabelFor(source === 'fresh' ? fresh.provider : config?.emailProvider);
   const campaignName = source === 'fresh' ? `${fresh.name} · new` : (campaigns.find((c) => c.id === campaignId)?.name || '—');
   // Review-step email preview. Fresh runs carry their content in state; existing
   // campaigns keep it frozen in the version, so we show a pointer instead.
@@ -388,7 +389,7 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
               ) : (<>
                 <div className="row gap12 mt16">
                   <label className="field grow"><span>Name</span><input className="input" value={fresh.name} onChange={fset('name')} /></label>
-                  <label className="field grow"><span>Provider</span><select className="input" value={fresh.provider} onChange={fset('provider')}><option value="smtp">Gmail (SMTP)</option><option value="resend">Resend</option></select></label>
+                  <label className="field grow"><span>Provider</span><ProviderSelect value={fresh.provider} onChange={fset('provider')} /></label>
                 </div>
                 <label className="field mt12"><span>Send from</span><select className="input" value={fresh.senderKey} onChange={fset('senderKey')}>{senders.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
                 <label className="field mt12"><span>Subject</span><input className="input" value={fresh.subject} onChange={fset('subject')} placeholder="Use {{name}} / {{business}}" /></label>
@@ -447,7 +448,7 @@ function LaunchWizard({ campaignId: initialCampaignId, companyName, startStep = 
                 </label>
                 <label className="field grow"><span>Provider</span>
                   {source === 'fresh'
-                    ? <select className="input" value={fresh.provider} onChange={fset('provider')}><option value="smtp">Gmail (SMTP)</option><option value="resend">Resend</option></select>
+                    ? <ProviderSelect value={fresh.provider} onChange={fset('provider')} />
                     : <input className="input" value={providerLabel} disabled />}
                 </label>
               </div>
